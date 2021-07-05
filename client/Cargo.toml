@@ -22,7 +22,10 @@ zeroize_derive = "1.0"
 anyhow = "1.0"
 thiserror = "1.0"
 futures = "0.3"
-riker = "0.4"
+actix = "0.12.0"
+
+# remove dependency
+# riker = "0.4"
 
 [dependencies.stronghold_engine]
 path = "../engine"

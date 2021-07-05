@@ -1,6 +1,10 @@
 // Copyright 2020-2021 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
+// actix types and modules
+// TODO: remove this comment
+use actix::{Actor, Context, Handler};
+
 use crate::{
     actors::{InternalResults, SHRequest, SHResults},
     line_error,
@@ -13,7 +17,7 @@ use engine::{
     vault::{ClientId, RecordId, VaultId},
 };
 
-use riker::actors::*;
+// use riker::actors::*;
 
 use std::{collections::HashSet, time::Duration};
 
@@ -22,7 +26,7 @@ use serde::{Deserialize, Serialize};
 pub type Store = Cache<Vec<u8>, Vec<u8>>;
 
 /// A `Client` Cache Actor which routes external messages to the rest of the Stronghold system.
-#[actor(SHResults, SHRequest, InternalResults)]
+// #[actor(SHResults, SHRequest, InternalResults)]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Client {
     pub client_id: ClientId,
@@ -31,6 +35,18 @@ pub struct Client {
     // Contains the Record Ids for the most recent Record in each vault.
     pub store: Store,
 }
+
+// impl Actor for Client {
+//     type Context = Context<Self>;
+// }
+
+// impl Handler<usize> for Client {
+//     type Result = Result<(), Box<dyn std::error::Error>>;
+
+//     fn handle(&mut self, msg: usize, ctx: &mut Self::Context) -> Self::Result {
+//         todo!()
+//     }
+// }
 
 impl Client {
     /// Creates a new Client given a `ClientID` and `ChannelRef<SHResults>`
@@ -153,7 +169,7 @@ impl Client {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     use crate::Provider;

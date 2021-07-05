@@ -3,7 +3,7 @@
 
 #![allow(clippy::type_complexity)]
 
-use riker::actors::*;
+// use riker::actors::*;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -31,7 +31,7 @@ use crate::{
     internals::Provider,
     line_error,
     state::{
-        client::{Client, ClientMsg, Store},
+        client::{Client, Store},
         key_store::KeyStore,
     },
     utils::{ResultMessage, StatusMessage},
@@ -194,6 +194,7 @@ impl Receive<InternalMsg> for InternalActor<Provider> {
                             Ok(())
                         })
                         .expect(line_error!());
+                    // TODO: create error
 
                     self.keystore.insert_key(vid, key);
 

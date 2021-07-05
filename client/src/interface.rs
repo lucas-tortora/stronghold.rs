@@ -1,7 +1,10 @@
 // Copyright 2020-2021 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
-use riker::actors::*;
+// removed this dependency
+// use riker::actors::*;
+
+use actix::{Actor, SystemRunner};
 
 use futures::{
     channel::mpsc::{channel, Receiver, Sender},
@@ -18,6 +21,7 @@ use engine::vault::RecordHint;
 
 #[cfg(feature = "communication")]
 use crate::actors::SHRequestPermission;
+
 #[cfg(feature = "communication")]
 use crate::utils::ResultMessage;
 use crate::{
@@ -47,24 +51,37 @@ use engine::vault::{ClientId, RecordId};
 /// metadata to interpret the data in the vault and store.
 pub struct Stronghold {
     // actor system.
-    pub system: ActorSystem,
+    pub system: Option<System>,
     // clients in the system.
-    clients: HashMap<ClientId, ActorRef<ClientMsg>>,
-    target: ActorRef<ClientMsg>,
+    clients: HashMap<ClientId, Actor<ClientMsg>>,
+    target: Actor<ClientMsg>,
 
     #[cfg(feature = "communication")]
     // communication actor ref
-    communication_actor: Option<ActorRef<CommunicationRequest<SHRequest, ClientMsg>>>,
+    communication_actor: Option<Actor<CommunicationRequest<SHRequest, ClientMsg>>>,
 }
 
 impl Stronghold {
     /// Initializes a new instance of the system.  Sets up the first client actor. Accepts a `ActorSystem`, the first
     /// client_path: `Vec<u8>` and any `StrongholdFlags` which pertain to the first actor.
-    pub fn init_stronghold_system(system: ActorSystem, client_path: Vec<u8>, _options: Vec<StrongholdFlags>) -> Self {
+    pub fn init_stronghold_system(
+        system: Option<SystemRunner>,
+        client_path: Vec<u8>,
+        _options: Vec<StrongholdFlags>,
+    ) -> Self {
         let client_id = ClientId::load_from_path(&client_path, &client_path).expect(line_error!());
         let id_str: String = client_id.into();
         let mut clients = HashMap::new();
 
+        let runner = match system {
+            Some(a) => a,
+            None => System::new(),
+        };
+
+        let ac = runner.block_on(async { Client::new(client_id).start() });
+        ac.send(9usize);
+
+        // todo
         let client = system
             .actor_of_args::<Client, _>(&id_str, client_id)
             .expect(line_error!());

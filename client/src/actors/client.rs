@@ -4,7 +4,7 @@
 use crate::{
     actors::{InternalMsg, InternalResults, SMsg},
     line_error,
-    state::client::{Client, ClientMsg},
+    state::client::Client,
     utils::{ResultMessage, StatusMessage},
     Location,
 };
@@ -19,7 +19,9 @@ use engine::{
 };
 use serde::{Deserialize, Serialize};
 
-use riker::actors::*;
+// use riker::actors::*;
+
+use actix::{Actor, Context, Handler};
 
 use core::{
     array::TryFromSliceError,
@@ -29,6 +31,83 @@ use std::{path::PathBuf, time::Duration};
 
 #[cfg(feature = "communication")]
 use communication::actor::{PermissionValue, RequestPermissions, ToPermissionVariants, VariantPermission};
+
+impl Actor for Client {
+    type Context = Context<Self>;
+}
+
+// --
+// -- NEW ACTIX IMPL
+// --
+
+impl Handler<SHRequest> for Client {
+    // TODO Define proper error types
+    type Result = Result<(), Box<dyn std::error::Error>>;
+
+    fn handle(&mut self, msg: SHRequest, ctx: &mut Self::Context) -> Self::Result {
+        match msg {
+            SHRequest::CheckVault(path) => todo!(),
+            SHRequest::CheckRecord { location } => todo!(),
+            SHRequest::WriteToStore {
+                location,
+                payload,
+                lifetime,
+            } => todo!(),
+            SHRequest::ReadFromStore { location } => todo!(),
+            SHRequest::DeleteFromStore(_) => todo!(),
+            SHRequest::CreateNewVault(_) => todo!(),
+            SHRequest::WriteToVault {
+                location,
+                payload,
+                hint,
+            } => todo!(),
+            SHRequest::ReadFromVault { location } => todo!(),
+            SHRequest::RevokeData { location } => todo!(),
+            SHRequest::GarbageCollect(_) => todo!(),
+            SHRequest::ListIds(_) => todo!(),
+            SHRequest::ReadSnapshot {
+                key,
+                filename,
+                path,
+                cid,
+                former_cid,
+            } => todo!(),
+            SHRequest::WriteSnapshot { key, filename, path } => todo!(),
+            SHRequest::FillSnapshot => todo!(),
+            SHRequest::ClearCache { kill } => todo!(),
+            SHRequest::ControlRequest(_) => todo!(),
+        }
+    }
+}
+
+impl Handler<SHResults> for Client {
+    type Result = Result<(), Box<dyn std::error::Error>>;
+
+    fn handle(&mut self, msg: SHResults, ctx: &mut Self::Context) -> Self::Result {
+        match msg {
+            SHResults::ReturnWriteStore(_) => todo!(),
+            SHResults::ReturnReadStore(_, _) => todo!(),
+            SHResults::ReturnDeleteStore(_) => todo!(),
+            SHResults::ReturnCreateVault(_) => todo!(),
+            SHResults::ReturnWriteVault(_) => todo!(),
+            SHResults::ReturnReadVault(_, _) => todo!(),
+            SHResults::ReturnRevoke(_) => todo!(),
+            SHResults::ReturnGarbage(_) => todo!(),
+            SHResults::ReturnList(_, _) => todo!(),
+            SHResults::ReturnFillSnap(_) => todo!(),
+            SHResults::ReturnWriteSnap(_) => todo!(),
+            SHResults::ReturnReadSnap(_) => todo!(),
+            SHResults::ReturnClearCache(_) => todo!(),
+            SHResults::ReturnControlRequest(_) => todo!(),
+            SHResults::ReturnExistsVault(_) => todo!(),
+            SHResults::ReturnExistsRecord(_) => todo!(),
+        }
+    }
+}
+
+// --
+// -- END NEW ACTIX IMPL
+// --
 
 /// `SLIP10DeriveInput` type used to specify a Seed location or a Key location for the `SLIP10Derive` procedure.
 #[derive(GuardDebug, Clone, Serialize, Deserialize)]
@@ -288,13 +367,13 @@ impl ActorFactoryArgs<ClientId> for Client {
 }
 
 /// Actor implementation for the Client.
-impl Actor for Client {
-    type Msg = ClientMsg;
+// impl Actor for Client {
+//     type Msg = ClientMsg;
 
-    fn recv(&mut self, ctx: &Context<Self::Msg>, msg: Self::Msg, sender: Sender) {
-        self.receive(ctx, msg, sender);
-    }
-}
+//     fn recv(&mut self, ctx: &Context<Self::Msg>, msg: Self::Msg, sender: Sender) {
+//         self.receive(ctx, msg, sender);
+//     }
+// }
 
 impl Receive<SHResults> for Client {
     type Msg = ClientMsg;
@@ -328,7 +407,7 @@ impl Receive<SHRequest> for Client {
         match msg {
             SHRequest::CheckVault(vpath) => {
                 let vid = self.derive_vault_id(vpath);
-                let res = matches!(self.vault_exist(vid), Some(_));
+                let res = self.vault_exist(vid).is_some(); // matches!(self.vault_exist(vid), Some(_));
 
                 sender
                     .as_ref()
