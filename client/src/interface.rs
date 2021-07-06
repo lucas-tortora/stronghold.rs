@@ -4,101 +4,106 @@
 // removed this dependency
 // use riker::actors::*;
 
-use actix::{Actor, SystemRunner};
+use actix::{Actor, Addr, System, SystemRunner};
 
 use futures::{
     channel::mpsc::{channel, Receiver, Sender},
     future::RemoteHandle,
 };
 
-#[cfg(feature = "communication")]
-use futures::{executor::block_on, StreamExt};
-
 use std::{collections::HashMap, path::PathBuf, time::Duration};
+use stronghold_utils::ask;
 use zeroize::Zeroize;
 
-use engine::vault::RecordHint;
-
-#[cfg(feature = "communication")]
-use crate::actors::SHRequestPermission;
-
-#[cfg(feature = "communication")]
-use crate::utils::ResultMessage;
 use crate::{
     actors::{InternalActor, ProcResult, Procedure, SHRequest, SHResults},
     line_error,
     state::{
-        client::{Client, ClientMsg},
-        snapshot::Snapshot,
+        client::{self, Client},
+        snapshot::{Snapshot, SnapshotState},
     },
     utils::{LoadFromPath, StatusMessage, StrongholdFlags, VaultFlags},
     Location, Provider,
 };
-#[cfg(feature = "communication")]
-use communication::{
-    actor::{
-        CommunicationActor, CommunicationActorConfig, CommunicationRequest, CommunicationResults,
-        EstablishedConnection, FirewallPermission, FirewallRule, RelayDirection, RequestDirection, VariantPermission,
-    },
-    behaviour::BehaviourConfig,
-    libp2p::{Keypair, Multiaddr, PeerId},
-};
-use stronghold_utils::ask;
-
+use engine::vault::RecordHint;
 use engine::vault::{ClientId, RecordId};
+
+#[cfg(feature = "communication")]
+use comm::*;
+
+/// communication feature relevant imports are bundled here.
+mod comm {
+    pub use crate::actors::SHRequestPermission;
+    pub use crate::utils::ResultMessage;
+    pub use futures::{executor::block_on, StreamExt};
+
+    pub use communication::{
+        actor::{
+            CommunicationActor, CommunicationActorConfig, CommunicationRequest, CommunicationResults,
+            EstablishedConnection, FirewallPermission, FirewallRule, RelayDirection, RequestDirection,
+            VariantPermission,
+        },
+        behaviour::BehaviourConfig,
+        libp2p::{Keypair, Multiaddr, PeerId},
+    };
+}
 
 /// The main type for the Stronghold System.  Used as the entry point for the actor model.  Contains various pieces of
 /// metadata to interpret the data in the vault and store.
-pub struct Stronghold {
-    // actor system.
-    pub system: Option<System>,
-    // clients in the system.
-    clients: HashMap<ClientId, Actor<ClientMsg>>,
-    target: Actor<ClientMsg>,
+pub struct Stronghold<A>
+where
+    A: Actor,
+{
+    pub system: Option<SystemRunner>,    // actor system
+    clients: HashMap<ClientId, Addr<A>>, // client (addr) in the actor system
+    target: Addr<A>,                     // client actor
 
     #[cfg(feature = "communication")]
-    // communication actor ref
-    communication_actor: Option<Actor<CommunicationRequest<SHRequest, ClientMsg>>>,
+    communication_actor: Option<Addr<A>>, // clients in the system. // communication_actor: Option<Actor<CommunicationRequest<SHRequest, A>>>,s
 }
 
 impl Stronghold {
-    /// Initializes a new instance of the system.  Sets up the first client actor. Accepts a `ActorSystem`, the first
+    /// Initializes a new instance of the system.  Sets up the first client actor. Accepts an optional [`SystemRunner`], the first
     /// client_path: `Vec<u8>` and any `StrongholdFlags` which pertain to the first actor.
     pub fn init_stronghold_system(
         system: Option<SystemRunner>,
         client_path: Vec<u8>,
         _options: Vec<StrongholdFlags>,
     ) -> Self {
-        let client_id = ClientId::load_from_path(&client_path, &client_path).expect(line_error!());
+        let client_id = ClientId::load_from_path(&client_path, &client_path).expect(crate::Error::IDError);
         let id_str: String = client_id.into();
         let mut clients = HashMap::new();
 
-        let runner = match system {
-            Some(a) => a,
-            None => System::new(),
-        };
+        let runner = system.unwrap_or_else(|| System::new());
 
-        let ac = runner.block_on(async { Client::new(client_id).start() });
-        ac.send(9usize);
+        // let runner = match system {
+        //     Some(a) => a,
+        //     None => System::new(),
+        // };
+
+        let client = Client::new(client_id).start();
+        let snapshot = Snapshot::new(SnapshotState::default()).start();
+
+        // let ac = runner.block_on(async { Client::new(client_id).start() });
+        // ac.send(9usize);
 
         // todo
-        let client = system
-            .actor_of_args::<Client, _>(&id_str, client_id)
-            .expect(line_error!());
-        system
-            .actor_of_args::<InternalActor<Provider>, _>(&format!("internal-{}", id_str), client_id)
-            .expect(line_error!());
+        // let client = system
+        //     .actor_of_args::<Client, _>(&id_str, client_id)
+        //     .expect(line_error!());
 
-        system.actor_of::<Snapshot>("snapshot").expect(line_error!());
+        // system
+        //     .actor_of_args::<InternalActor<Provider>, _>(&format!("internal-{}", id_str), client_id)
+        //     .expect(line_error!());
+
+        // system.actor_of::<Snapshot>("snapshot").expect(line_error!());
 
         clients.insert(client_id, client.clone());
 
         Self {
             system,
             clients,
-
             target: client,
-
             #[cfg(feature = "communication")]
             communication_actor: None,
         }
