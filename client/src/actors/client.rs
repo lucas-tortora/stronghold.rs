@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 // use riker::actors::*;
 
-use actix::{Actor, Context, Handler};
+use actix::{registry::SystemService, Actor, Context, Handler};
 
 use core::{
     array::TryFromSliceError,
@@ -32,13 +32,15 @@ use std::{path::PathBuf, time::Duration};
 #[cfg(feature = "communication")]
 use communication::actor::{PermissionValue, RequestPermissions, ToPermissionVariants, VariantPermission};
 
+// --
+// -- NEW ACTIX IMPL
+// --
+
 impl Actor for Client {
     type Context = Context<Self>;
 }
 
-// --
-// -- NEW ACTIX IMPL
-// --
+impl SystemService for Client {}
 
 impl Handler<SHRequest> for Client {
     // TODO Define proper error types
@@ -360,11 +362,11 @@ pub enum SHResults {
     ReturnExistsRecord(bool),
 }
 
-impl ActorFactoryArgs<ClientId> for Client {
-    fn create_args(client_id: ClientId) -> Self {
-        Client::new(client_id)
-    }
-}
+// impl ActorFactoryArgs<ClientId> for Client {
+//     fn create_args(client_id: ClientId) -> Self {
+//         Client::new(client_id)
+//     }
+// }
 
 /// Actor implementation for the Client.
 // impl Actor for Client {
@@ -375,11 +377,11 @@ impl ActorFactoryArgs<ClientId> for Client {
 //     }
 // }
 
-impl Receive<SHResults> for Client {
-    type Msg = ClientMsg;
+// impl Receive<SHResults> for Client {
+//     type Msg = ClientMsg;
 
-    fn receive(&mut self, _ctx: &Context<Self::Msg>, _msg: SHResults, _sender: Sender) {}
-}
+//     fn receive(&mut self, _ctx: &Context<Self::Msg>, _msg: SHResults, _sender: Sender) {}
+// }
 
 impl Receive<SHRequest> for Client {
     type Msg = ClientMsg;

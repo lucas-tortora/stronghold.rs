@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod client;
+
+#[deprecated]
 mod internal;
+
+mod registry;
 mod snapshot;
 
 pub use self::{
