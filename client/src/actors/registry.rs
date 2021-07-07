@@ -7,13 +7,6 @@
 //! bound to a unique `client_id`. [`Client`] actors can
 //! be added, removed or queried for their [`actix::Addr`].
 //! The main purpose is to access client actors
-//!
-//! # Examples
-//! ```no_run
-//! // create a registry
-//! let registry = Registry::default().start();
-//!
-//! ```
 
 use actix::{Actor, Addr, Handler, Message, Supervised};
 use engine::vault::ClientId;

@@ -5,8 +5,8 @@ mod client;
 
 #[deprecated]
 mod internal;
-
 mod registry;
+mod secure;
 mod snapshot;
 
 pub use self::{
