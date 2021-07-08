@@ -27,7 +27,8 @@ pub type Store = Cache<Vec<u8>, Vec<u8>>;
 
 /// A `Client` Cache Actor which routes external messages to the rest of the Stronghold system.
 // #[actor(SHResults, SHRequest, InternalResults)]
-#[derive(Debug, Serialize, Deserialize, Clone)]
+// TODO marker todo, added default derivation
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Client {
     pub client_id: ClientId,
     // Contains the vault ids and the record ids with their associated indexes.

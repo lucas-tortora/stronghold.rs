@@ -12,6 +12,9 @@ mod snapshot;
 pub use self::{
     client::{ProcResult, Procedure, SHRequest, SHResults, SLIP10DeriveInput},
     internal::{InternalActor, InternalMsg, InternalResults},
+    registry::{GetClient, HasClient, InsertClient, Registry, RegistryError, RemoveClient},
+    secure::messages,
+    secure::SecureActor,
     snapshot::SMsg,
 };
 

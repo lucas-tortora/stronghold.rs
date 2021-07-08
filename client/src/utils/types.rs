@@ -109,6 +109,7 @@ impl AsRef<Location> for Location {
     }
 }
 
+#[deprecated(note = "will be removed and replaced by rules system")]
 /// Policy options for modifying an entire Stronghold.  Must be specified on creation.
 #[derive(Clone, Debug)]
 pub enum StrongholdFlags {

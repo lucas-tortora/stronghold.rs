@@ -1,25 +1,29 @@
 // Copyright 2020-2021 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
-// removed this dependency
-// use riker::actors::*;
+use futures::future::RemoteHandle;
+// TODO:
+use riker::*;
 
-use actix::{Actor, Addr, System, SystemRunner};
+use actix::{Actor, Addr, Supervisor, System, SystemRunner};
 
-use futures::{
-    channel::mpsc::{channel, Receiver, Sender},
-    future::RemoteHandle,
-};
+// use futures::{
+//     channel::mpsc::{channel, Receiver, Sender},
+//     future::RemoteHandle,
+// };
 
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 use stronghold_utils::ask;
 use zeroize::Zeroize;
 
 use crate::{
-    actors::{InternalActor, ProcResult, Procedure, SHRequest, SHResults},
+    actors::{
+        messages as secure_messages, GetClient, HasClient, InsertClient, InternalActor, ProcResult, Procedure,
+        Registry, SHRequest, SHResults, SecureActor,
+    },
     line_error,
     state::{
-        client::{self, Client},
+        client::Client,
         snapshot::{Snapshot, SnapshotState},
     },
     utils::{LoadFromPath, StatusMessage, StrongholdFlags, VaultFlags},
@@ -54,59 +58,45 @@ pub struct Stronghold<A>
 where
     A: Actor,
 {
-    pub system: Option<SystemRunner>,    // actor system
-    clients: HashMap<ClientId, Addr<A>>, // client (addr) in the actor system
-    target: Addr<A>,                     // client actor
+    pub system: Option<SystemRunner>,
+    registry: Addr<Registry<Client>>,
+    target: Addr<Client>,
+    secure: Addr<SecureActor>,
 
     #[cfg(feature = "communication")]
-    communication_actor: Option<Addr<A>>, // clients in the system. // communication_actor: Option<Actor<CommunicationRequest<SHRequest, A>>>,s
+    communication_actor: Option<Addr<A>>,
 }
 
-impl Stronghold {
+impl<A: Actor> Stronghold<A> {
     /// Initializes a new instance of the system.  Sets up the first client actor. Accepts an optional [`SystemRunner`], the first
     /// client_path: `Vec<u8>` and any `StrongholdFlags` which pertain to the first actor.
     pub fn init_stronghold_system(
         system: Option<SystemRunner>,
         client_path: Vec<u8>,
         _options: Vec<StrongholdFlags>,
-    ) -> Self {
-        let client_id = ClientId::load_from_path(&client_path, &client_path).expect(crate::Error::IDError);
-        let id_str: String = client_id.into();
-        let mut clients = HashMap::new();
-
+    ) -> Result<Self, anyhow::Error> {
+        // create client actor
+        let client_id =
+            ClientId::load_from_path(&client_path, &client_path).expect(crate::Error::IDError.to_string().as_str());
         let runner = system.unwrap_or_else(|| System::new());
-
-        // let runner = match system {
-        //     Some(a) => a,
-        //     None => System::new(),
-        // };
-
-        let client = Client::new(client_id).start();
+        let registry = Supervisor::start(|_| Registry::default());
         let snapshot = Snapshot::new(SnapshotState::default()).start();
+        let target = match runner.block_on(registry.send(InsertClient { id: client_id }))? {
+            Ok(addr) => addr,
+            Err(e) => return Err(anyhow::anyhow!(e)),
+        };
 
-        // let ac = runner.block_on(async { Client::new(client_id).start() });
-        // ac.send(9usize);
+        let secure = SecureActor::default().start();
 
-        // todo
-        // let client = system
-        //     .actor_of_args::<Client, _>(&id_str, client_id)
-        //     .expect(line_error!());
-
-        // system
-        //     .actor_of_args::<InternalActor<Provider>, _>(&format!("internal-{}", id_str), client_id)
-        //     .expect(line_error!());
-
-        // system.actor_of::<Snapshot>("snapshot").expect(line_error!());
-
-        clients.insert(client_id, client.clone());
-
-        Self {
+        Ok(Self {
             system,
-            clients,
-            target: client,
+            registry,
+            target,
+            secure,
+
             #[cfg(feature = "communication")]
             communication_actor: None,
-        }
+        })
     }
 
     /// Spawns a new set of actors for the Stronghold system. Accepts the client_path: `Vec<u8>` and the options:
@@ -117,24 +107,26 @@ impl Stronghold {
         _options: Vec<StrongholdFlags>,
     ) -> StatusMessage {
         let client_id = ClientId::load_from_path(&client_path, &client_path.clone()).expect(line_error!());
-        let id_str: String = client_id.into();
 
-        #[allow(clippy::map_entry)]
-        if self.clients.contains_key(&client_id) {
-            self.switch_actor_target(client_path).await;
-        } else {
-            let client = self
-                .system
-                .actor_of_args::<Client, _>(&id_str, client_id)
-                .expect(line_error!());
-            self.system
-                .actor_of_args::<InternalActor<Provider>, _>(&format!("internal-{}", id_str), client_id)
-                .expect(line_error!());
+        if let Ok(result) = self.registry.send(GetClient { id: client_id }).await {
+            match result {
+                Some(client) => {
+                    self.target = client;
+                }
+                None => {
+                    if let Ok(result) = self.registry.send(InsertClient { id: client_id }).await {
+                        self.target = match result {
+                            Ok(client) => client,
+                            Err(e) => return StatusMessage::Error("".to_string()),
+                        };
+                    }
 
-            self.clients.insert(client_id, client.clone());
-
-            self.target = client;
-        }
+                    // shut down secure actor
+                    self.secure.send(secure_messages::Terminate).await;
+                    self.secure = SecureActor::default().start();
+                }
+            }
+        };
 
         StatusMessage::OK
     }
@@ -143,28 +135,19 @@ impl Stronghold {
     pub async fn switch_actor_target(&mut self, client_path: Vec<u8>) -> StatusMessage {
         let client_id = ClientId::load_from_path(&client_path, &client_path.clone()).expect(line_error!());
 
-        if let Some(client) = self.clients.get(&client_id) {
-            self.target = client.clone();
+        if let Ok(result) = self.registry.send(GetClient { id: client_id }).await {
+            match result {
+                Some(client) => self.target = client,
+                None => return StatusMessage::Error("Could not find actor with provided client path".into()),
+            }
 
             #[cfg(feature = "communication")]
-            if let Some(communication_actor) = self.communication_actor.as_ref() {
-                match ask(
-                    &self.system,
-                    communication_actor,
-                    CommunicationRequest::SetClientRef(client.clone()),
-                )
-                .await
-                {
-                    CommunicationResults::<SHResults>::SetClientRefAck => {}
-                    _ => {
-                        return StatusMessage::Error("Could not set communication client target".into());
-                    }
-                }
+            if let Some(comm) = &self.communication_actor {
+                // TODO set reference to client actor inside the communication actor
             }
-            StatusMessage::OK
-        } else {
-            StatusMessage::Error("Unable to find the actor with that client path".into())
         }
+
+        StatusMessage::OK
     }
 
     /// Writes data into the Stronghold. Uses the current target actor as the client and writes to the specified
@@ -520,7 +503,7 @@ impl Stronghold {
 }
 
 #[cfg(feature = "communication")]
-impl Stronghold {
+impl<A: Actor> Stronghold<A> {
     /// Spawn the communication actor and swarm with a pre-existing keypair
     /// Per default, the firewall allows all outgoing, and reject all incoming requests.
     pub fn spawn_communication_with_keypair(&mut self, keypair: Keypair) -> StatusMessage {
@@ -900,30 +883,31 @@ impl Stronghold {
         }
     }
 
-    /// Keeps stronghold in a running state. This call is blocking.
-    ///
-    /// This function accepts an optional function for more control over how long
-    /// stronghold shall block.
-    pub fn keep_alive<F>(&self, callback: Option<F>)
-    where
-        F: FnOnce() -> Result<(), Box<dyn std::error::Error>>,
-    {
-        match callback {
-            Some(cb) => {
-                block_on(async {
-                    cb().expect("Calling blocker function failed");
-                });
-            }
-            None => {
-                // create a channel, read from it, but never write.
-                // this might be a trivial method to keep an instance running.
-                let (_tx, rx): (Sender<usize>, Receiver<usize>) = channel(1);
+    // Keeps stronghold in a running state. This call is blocking.
+    //
+    // This function accepts an optional function for more control over how long
+    // stronghold shall block.
+    // #[cfg(test)]
+    // pub fn keep_alive<F>(&self, callback: Option<F>)
+    // where
+    //     F: FnOnce() -> Result<(), Box<dyn std::error::Error>>,
+    // {
+    //     match callback {
+    //         Some(cb) => {
+    //             block_on(async {
+    //                 cb().expect("Calling blocker function failed");
+    //             });
+    //         }
+    //         None => {
+    //             // create a channel, read from it, but never write.
+    //             // this might be a trivial method to keep an instance running.
+    //             let (_tx, rx): (Sender<usize>, Receiver<usize>) = channel(1);
 
-                let waiter = async {
-                    rx.map(|f| f).collect::<Vec<usize>>().await;
-                };
-                block_on(waiter);
-            }
-        }
-    }
+    //             let waiter = async {
+    //                 rx.map(|f| f).collect::<Vec<usize>>().await;
+    //             };
+    //             block_on(waiter);
+    //         }
+    //     }
+    // }
 }

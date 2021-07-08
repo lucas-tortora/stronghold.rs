@@ -48,6 +48,12 @@ pub enum SMsg {
     },
 }
 
+// new actix impl
+
+impl actix::Actor for Snapshot {}
+
+// end new actix impl
+
 /// Actor Factory for the Snapshot.
 impl ActorFactory for Snapshot {
     fn create() -> Self {

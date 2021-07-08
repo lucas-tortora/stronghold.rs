@@ -8,7 +8,10 @@ use crypto::macs::hmac::HMAC_SHA512;
 
 use engine::vault::{ClientId, VaultId};
 
-fn setup_stronghold() -> Stronghold {
+fn setup_stronghold<A>() -> Stronghold<A>
+where
+    A: actix::Actor,
+{
     let sys = ActorSystem::new().unwrap();
 
     let client_path = b"test".to_vec();

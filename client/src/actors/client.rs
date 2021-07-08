@@ -9,6 +9,8 @@ use crate::{
     Location,
 };
 
+use actix::Message;
+
 use stronghold_utils::GuardDebug;
 
 use crypto::keys::slip10::{Chain, ChainCode};
@@ -19,9 +21,9 @@ use engine::{
 };
 use serde::{Deserialize, Serialize};
 
-// use riker::actors::*;
+use riker::actors::{Receive, Sender};
 
-use actix::{registry::SystemService, Actor, Context, Handler};
+use actix::{registry::SystemService, Actor, Context, Handler, Supervised};
 
 use core::{
     array::TryFromSliceError,
@@ -40,11 +42,13 @@ impl Actor for Client {
     type Context = Context<Self>;
 }
 
+impl Supervised for Client {}
+
 impl SystemService for Client {}
 
 impl Handler<SHRequest> for Client {
     // TODO Define proper error types
-    type Result = Result<(), Box<dyn std::error::Error>>;
+    type Result = (); //Result<(), Box<dyn std::error::Error>>;
 
     fn handle(&mut self, msg: SHRequest, ctx: &mut Self::Context) -> Self::Result {
         match msg {
@@ -63,6 +67,7 @@ impl Handler<SHRequest> for Client {
                 payload,
                 hint,
             } => todo!(),
+            #[cfg(test)]
             SHRequest::ReadFromVault { location } => todo!(),
             SHRequest::RevokeData { location } => todo!(),
             SHRequest::GarbageCollect(_) => todo!(),
@@ -83,7 +88,7 @@ impl Handler<SHRequest> for Client {
 }
 
 impl Handler<SHResults> for Client {
-    type Result = Result<(), Box<dyn std::error::Error>>;
+    type Result = (); //Result<(), Box<dyn std::error::Error>>;
 
     fn handle(&mut self, msg: SHResults, ctx: &mut Self::Context) -> Self::Result {
         match msg {
@@ -263,6 +268,11 @@ impl From<ProcResult> for SerdeProcResult {
     }
 }
 
+// TODO move
+// impl Message for SHRequest {}
+
+#[derive(Message)]
+#[rtype(return = "()")]
 #[allow(dead_code)]
 #[derive(Clone, GuardDebug, Serialize, Deserialize)]
 #[cfg_attr(feature = "communication", derive(RequestPermissions))]
@@ -341,6 +351,8 @@ pub enum SHRequest {
     ControlRequest(Procedure),
 }
 
+#[derive(Message)]
+#[rtype(return = "()")]
 /// Messages that come from stronghold
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum SHResults {
@@ -368,7 +380,7 @@ pub enum SHResults {
 //     }
 // }
 
-/// Actor implementation for the Client.
+// Actor implementation for the Client.
 // impl Actor for Client {
 //     type Msg = ClientMsg;
 
@@ -383,469 +395,474 @@ pub enum SHResults {
 //     fn receive(&mut self, _ctx: &Context<Self::Msg>, _msg: SHResults, _sender: Sender) {}
 // }
 
-impl Receive<SHRequest> for Client {
-    type Msg = ClientMsg;
+// TODO remove
+// #[derive(Message)]
+// #[rtype(return = "()")]
+// struct ClientMsg {}
 
-    fn receive(&mut self, ctx: &Context<Self::Msg>, msg: SHRequest, sender: Sender) {
-        macro_rules! ensure_vault_exists {
-            ( $x:expr, $V:tt, $k:expr ) => {
-                if self.vault_exist($x).is_none() {
-                    sender
-                        .as_ref()
-                        .expect(line_error!())
-                        .try_tell(
-                            SHResults::ReturnControlRequest(ProcResult::$V(ResultMessage::Error(format!(
-                                "Failed to find {} vault. Please generate one",
-                                $k
-                            )))),
-                            None,
-                        )
-                        .expect(line_error!());
-                    return;
-                }
-            };
-        }
+// impl Receive<SHRequest> for Client {
+// type Msg = ClientMsg;
 
-        match msg {
-            SHRequest::CheckVault(vpath) => {
-                let vid = self.derive_vault_id(vpath);
-                let res = self.vault_exist(vid).is_some(); // matches!(self.vault_exist(vid), Some(_));
+// fn receive(&mut self, ctx: &Context<Self::Msg>, msg: SHRequest, sender: Sender) {
+//     macro_rules! ensure_vault_exists {
+//         ( $x:expr, $V:tt, $k:expr ) => {
+//             if self.vault_exist($x).is_none() {
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(
+//                         SHResults::ReturnControlRequest(ProcResult::$V(ResultMessage::Error(format!(
+//                             "Failed to find {} vault. Please generate one",
+//                             $k
+//                         )))),
+//                         None,
+//                     )
+//                     .expect(line_error!());
+//                 return;
+//             }
+//         };
+//     }
 
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnExistsVault(res), None)
-                    .expect(line_error!());
-            }
-            SHRequest::CheckRecord { location } => {
-                let client_str = self.get_client_str();
-                let (vid, rid) = self.resolve_location(location);
+//     match msg {
+//         SHRequest::CheckVault(vpath) => {
+//             let vid = self.derive_vault_id(vpath);
+//             let res = self.vault_exist(vid).is_some(); // matches!(self.vault_exist(vid), Some(_));
 
-                let internal = ctx
-                    .select(&format!("/user/internal-{}/", client_str))
-                    .expect(line_error!());
+//             sender
+//                 .as_ref()
+//                 .expect(line_error!())
+//                 .try_tell(SHResults::ReturnExistsVault(res), None)
+//                 .expect(line_error!());
+//         }
+//         SHRequest::CheckRecord { location } => {
+//             let client_str = self.get_client_str();
+//             let (vid, rid) = self.resolve_location(location);
 
-                internal.try_tell(InternalMsg::CheckRecord(vid, rid), sender);
-            }
-            SHRequest::CreateNewVault(location) => {
-                let (vid, rid) = self.resolve_location(location);
-                let client_str = self.get_client_str();
+//             let internal = ctx
+//                 .select(&format!("/user/internal-{}/", client_str))
+//                 .expect(line_error!());
 
-                self.add_new_vault(vid);
+//             internal.try_tell(InternalMsg::CheckRecord(vid, rid), sender);
+//         }
+//         SHRequest::CreateNewVault(location) => {
+//             let (vid, rid) = self.resolve_location(location);
+//             let client_str = self.get_client_str();
 
-                let internal = ctx
-                    .select(&format!("/user/internal-{}/", client_str))
-                    .expect(line_error!());
+//             self.add_new_vault(vid);
 
-                internal.try_tell(InternalMsg::CreateVault(vid, rid), sender);
-            }
-            SHRequest::WriteToVault {
-                location,
-                payload,
-                hint,
-            } => {
-                let (vid, rid) = self.resolve_location(location);
+//             let internal = ctx
+//                 .select(&format!("/user/internal-{}/", client_str))
+//                 .expect(line_error!());
 
-                let client_str = self.get_client_str();
+//             internal.try_tell(InternalMsg::CreateVault(vid, rid), sender);
+//         }
+//         SHRequest::WriteToVault {
+//             location,
+//             payload,
+//             hint,
+//         } => {
+//             let (vid, rid) = self.resolve_location(location);
 
-                let internal = ctx
-                    .select(&format!("/user/internal-{}/", client_str))
-                    .expect(line_error!());
+//             let client_str = self.get_client_str();
 
-                internal.try_tell(InternalMsg::WriteToVault(vid, rid, payload, hint), sender);
-            }
+//             let internal = ctx
+//                 .select(&format!("/user/internal-{}/", client_str))
+//                 .expect(line_error!());
 
-            #[cfg(test)]
-            SHRequest::ReadFromVault { location } => {
-                let (vid, rid) = self.resolve_location(location);
+//             internal.try_tell(InternalMsg::WriteToVault(vid, rid, payload, hint), sender);
+//         }
 
-                let client_str = self.get_client_str();
+//         #[cfg(test)]
+//         SHRequest::ReadFromVault { location } => {
+//             let (vid, rid) = self.resolve_location(location);
 
-                let internal = ctx
-                    .select(&format!("/user/internal-{}/", client_str))
-                    .expect(line_error!());
+//             let client_str = self.get_client_str();
 
-                internal.try_tell(InternalMsg::ReadFromVault(vid, rid), sender);
-            }
-            SHRequest::RevokeData { location } => {
-                let (vid, rid) = self.resolve_location(location);
+//             let internal = ctx
+//                 .select(&format!("/user/internal-{}/", client_str))
+//                 .expect(line_error!());
 
-                let client_str = self.get_client_str();
+//             internal.try_tell(InternalMsg::ReadFromVault(vid, rid), sender);
+//         }
+//         SHRequest::RevokeData { location } => {
+//             let (vid, rid) = self.resolve_location(location);
 
-                let internal = ctx
-                    .select(&format!("/user/internal-{}/", client_str))
-                    .expect(line_error!());
+//             let client_str = self.get_client_str();
 
-                internal.try_tell(InternalMsg::RevokeData(vid, rid), sender);
-            }
-            SHRequest::GarbageCollect(vpath) => {
-                let vid = self.derive_vault_id(vpath);
+//             let internal = ctx
+//                 .select(&format!("/user/internal-{}/", client_str))
+//                 .expect(line_error!());
 
-                let client_str = self.get_client_str();
+//             internal.try_tell(InternalMsg::RevokeData(vid, rid), sender);
+//         }
+//         SHRequest::GarbageCollect(vpath) => {
+//             let vid = self.derive_vault_id(vpath);
 
-                let internal = ctx
-                    .select(&format!("/user/internal-{}/", client_str))
-                    .expect(line_error!());
+//             let client_str = self.get_client_str();
 
-                internal.try_tell(InternalMsg::GarbageCollect(vid), sender);
-            }
-            SHRequest::ListIds(vpath) => {
-                let vid = self.derive_vault_id(vpath);
+//             let internal = ctx
+//                 .select(&format!("/user/internal-{}/", client_str))
+//                 .expect(line_error!());
 
-                let client_str = self.get_client_str();
+//             internal.try_tell(InternalMsg::GarbageCollect(vid), sender);
+//         }
+//         SHRequest::ListIds(vpath) => {
+//             let vid = self.derive_vault_id(vpath);
 
-                let internal = ctx
-                    .select(&format!("/user/internal-{}/", client_str))
-                    .expect(line_error!());
+//             let client_str = self.get_client_str();
 
-                internal.try_tell(InternalMsg::ListIds(vid), sender);
-            }
+//             let internal = ctx
+//                 .select(&format!("/user/internal-{}/", client_str))
+//                 .expect(line_error!());
 
-            SHRequest::ReadSnapshot {
-                key,
-                filename,
-                path,
-                cid,
-                former_cid,
-            } => {
-                let client_str = self.get_client_str();
+//             internal.try_tell(InternalMsg::ListIds(vid), sender);
+//         }
 
-                let internal = ctx
-                    .select(&format!("/user/internal-{}/", client_str))
-                    .expect(line_error!());
+//         SHRequest::ReadSnapshot {
+//             key,
+//             filename,
+//             path,
+//             cid,
+//             former_cid,
+//         } => {
+//             let client_str = self.get_client_str();
 
-                internal.try_tell(InternalMsg::ReadSnapshot(key, filename, path, cid, former_cid), sender);
-            }
-            SHRequest::ClearCache { kill } => {
-                self.clear_cache();
+//             let internal = ctx
+//                 .select(&format!("/user/internal-{}/", client_str))
+//                 .expect(line_error!());
 
-                let client_str = self.get_client_str();
+//             internal.try_tell(InternalMsg::ReadSnapshot(key, filename, path, cid, former_cid), sender);
+//         }
+//         SHRequest::ClearCache { kill } => {
+//             self.clear_cache();
 
-                let internal = ctx
-                    .select(&format!("/user/internal-{}/", client_str))
-                    .expect(line_error!());
+//             let client_str = self.get_client_str();
 
-                if kill {
-                    internal.try_tell(InternalMsg::KillInternal, None);
+//             let internal = ctx
+//                 .select(&format!("/user/internal-{}/", client_str))
+//                 .expect(line_error!());
 
-                    sender
-                        .as_ref()
-                        .expect(line_error!())
-                        .try_tell(SHResults::ReturnClearCache(ResultMessage::Ok(())), None)
-                        .expect(line_error!());
+//             if kill {
+//                 internal.try_tell(InternalMsg::KillInternal, None);
 
-                    ctx.stop(ctx.myself());
-                } else {
-                    internal.try_tell(InternalMsg::ClearCache, sender);
-                }
-            }
-            SHRequest::FillSnapshot => {
-                let client_str = self.get_client_str();
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnClearCache(ResultMessage::Ok(())), None)
+//                     .expect(line_error!());
 
-                let internal = ctx
-                    .select(&format!("/user/internal-{}/", client_str))
-                    .expect(line_error!());
+//                 ctx.stop(ctx.myself());
+//             } else {
+//                 internal.try_tell(InternalMsg::ClearCache, sender);
+//             }
+//         }
+//         SHRequest::FillSnapshot => {
+//             let client_str = self.get_client_str();
 
-                internal.try_tell(InternalMsg::FillSnapshot { client: self.clone() }, sender)
-            }
-            SHRequest::WriteSnapshot { key, filename, path } => {
-                let snapshot = ctx.select("/user/snapshot/").expect(line_error!());
+//             let internal = ctx
+//                 .select(&format!("/user/internal-{}/", client_str))
+//                 .expect(line_error!());
 
-                snapshot.try_tell(SMsg::WriteSnapshot { key, filename, path }, sender);
-            }
-            SHRequest::DeleteFromStore(loc) => {
-                let (vid, _) = self.resolve_location(loc);
+//             internal.try_tell(InternalMsg::FillSnapshot { client: self.clone() }, sender)
+//         }
+//         SHRequest::WriteSnapshot { key, filename, path } => {
+//             let snapshot = ctx.select("/user/snapshot/").expect(line_error!());
 
-                self.store_delete_item(vid.into());
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnDeleteStore(StatusMessage::Ok(())), None)
-                    .expect(line_error!());
-            }
-            SHRequest::WriteToStore {
-                location,
-                payload,
-                lifetime,
-            } => {
-                let (vid, _) = self.resolve_location(location);
+//             snapshot.try_tell(SMsg::WriteSnapshot { key, filename, path }, sender);
+//         }
+//         SHRequest::DeleteFromStore(loc) => {
+//             let (vid, _) = self.resolve_location(loc);
 
-                self.write_to_store(vid.into(), payload, lifetime);
+//             self.store_delete_item(vid.into());
+//             sender
+//                 .as_ref()
+//                 .expect(line_error!())
+//                 .try_tell(SHResults::ReturnDeleteStore(StatusMessage::Ok(())), None)
+//                 .expect(line_error!());
+//         }
+//         SHRequest::WriteToStore {
+//             location,
+//             payload,
+//             lifetime,
+//         } => {
+//             let (vid, _) = self.resolve_location(location);
 
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnWriteStore(StatusMessage::Ok(())), None)
-                    .expect(line_error!());
-            }
-            SHRequest::ReadFromStore { location } => {
-                let (vid, _) = self.resolve_location(location);
+//             self.write_to_store(vid.into(), payload, lifetime);
 
-                let payload = self.read_from_store(vid.into());
+//             sender
+//                 .as_ref()
+//                 .expect(line_error!())
+//                 .try_tell(SHResults::ReturnWriteStore(StatusMessage::Ok(())), None)
+//                 .expect(line_error!());
+//         }
+//         SHRequest::ReadFromStore { location } => {
+//             let (vid, _) = self.resolve_location(location);
 
-                if let Some(payload) = payload {
-                    sender
-                        .as_ref()
-                        .expect(line_error!())
-                        .try_tell(SHResults::ReturnReadStore(payload, StatusMessage::Ok(())), None)
-                        .expect(line_error!());
-                } else {
-                    sender
-                        .as_ref()
-                        .expect(line_error!())
-                        .try_tell(
-                            SHResults::ReturnReadStore(
-                                vec![],
-                                StatusMessage::Error("Unable to read from store".into()),
-                            ),
-                            None,
-                        )
-                        .expect(line_error!());
-                }
-            }
-            SHRequest::ControlRequest(procedure) => {
-                let client_str = self.get_client_str();
+//             let payload = self.read_from_store(vid.into());
 
-                let internal = ctx
-                    .select(&format!("/user/internal-{}/", client_str))
-                    .expect(line_error!());
+//             if let Some(payload) = payload {
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnReadStore(payload, StatusMessage::Ok(())), None)
+//                     .expect(line_error!());
+//             } else {
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(
+//                         SHResults::ReturnReadStore(
+//                             vec![],
+//                             StatusMessage::Error("Unable to read from store".into()),
+//                         ),
+//                         None,
+//                     )
+//                     .expect(line_error!());
+//             }
+//         }
+//         SHRequest::ControlRequest(procedure) => {
+//             let client_str = self.get_client_str();
 
-                match procedure {
-                    Procedure::SLIP10Generate {
-                        output,
-                        hint,
-                        size_bytes,
-                    } => {
-                        let (vid, rid) = self.resolve_location(output);
+//             let internal = ctx
+//                 .select(&format!("/user/internal-{}/", client_str))
+//                 .expect(line_error!());
 
-                        if self.vault_exist(vid).is_none() {
-                            self.add_new_vault(vid);
-                        }
+//             match procedure {
+//                 Procedure::SLIP10Generate {
+//                     output,
+//                     hint,
+//                     size_bytes,
+//                 } => {
+//                     let (vid, rid) = self.resolve_location(output);
 
-                        internal.try_tell(
-                            InternalMsg::SLIP10Generate {
-                                vault_id: vid,
-                                record_id: rid,
-                                hint,
-                                size_bytes: size_bytes.unwrap_or(64),
-                            },
-                            sender,
-                        )
-                    }
-                    Procedure::SLIP10Derive {
-                        chain,
-                        input: SLIP10DeriveInput::Seed(seed),
-                        output,
-                        hint,
-                    } => {
-                        let (seed_vault_id, seed_record_id) = self.resolve_location(seed);
-                        ensure_vault_exists!(seed_vault_id, SLIP10Derive, "seed");
+//                     if self.vault_exist(vid).is_none() {
+//                         self.add_new_vault(vid);
+//                     }
 
-                        let (key_vault_id, key_record_id) = self.resolve_location(output);
+//                     internal.try_tell(
+//                         InternalMsg::SLIP10Generate {
+//                             vault_id: vid,
+//                             record_id: rid,
+//                             hint,
+//                             size_bytes: size_bytes.unwrap_or(64),
+//                         },
+//                         sender,
+//                     )
+//                 }
+//                 Procedure::SLIP10Derive {
+//                     chain,
+//                     input: SLIP10DeriveInput::Seed(seed),
+//                     output,
+//                     hint,
+//                 } => {
+//                     let (seed_vault_id, seed_record_id) = self.resolve_location(seed);
+//                     ensure_vault_exists!(seed_vault_id, SLIP10Derive, "seed");
 
-                        if self.vault_exist(key_vault_id).is_none() {
-                            self.add_new_vault(key_vault_id);
-                        }
+//                     let (key_vault_id, key_record_id) = self.resolve_location(output);
 
-                        internal.try_tell(
-                            InternalMsg::SLIP10DeriveFromSeed {
-                                chain,
-                                seed_vault_id,
-                                seed_record_id,
-                                key_vault_id,
-                                key_record_id,
-                                hint,
-                            },
-                            sender,
-                        )
-                    }
-                    Procedure::SLIP10Derive {
-                        chain,
-                        input: SLIP10DeriveInput::Key(parent),
-                        output,
-                        hint,
-                    } => {
-                        let (parent_vault_id, parent_record_id) = self.resolve_location(parent);
-                        ensure_vault_exists!(parent_vault_id, SLIP10Derive, "parent key");
+//                     if self.vault_exist(key_vault_id).is_none() {
+//                         self.add_new_vault(key_vault_id);
+//                     }
 
-                        let (child_vault_id, child_record_id) = self.resolve_location(output);
+//                     internal.try_tell(
+//                         InternalMsg::SLIP10DeriveFromSeed {
+//                             chain,
+//                             seed_vault_id,
+//                             seed_record_id,
+//                             key_vault_id,
+//                             key_record_id,
+//                             hint,
+//                         },
+//                         sender,
+//                     )
+//                 }
+//                 Procedure::SLIP10Derive {
+//                     chain,
+//                     input: SLIP10DeriveInput::Key(parent),
+//                     output,
+//                     hint,
+//                 } => {
+//                     let (parent_vault_id, parent_record_id) = self.resolve_location(parent);
+//                     ensure_vault_exists!(parent_vault_id, SLIP10Derive, "parent key");
 
-                        if self.vault_exist(child_vault_id).is_none() {
-                            self.add_new_vault(child_vault_id);
-                        }
+//                     let (child_vault_id, child_record_id) = self.resolve_location(output);
 
-                        internal.try_tell(
-                            InternalMsg::SLIP10DeriveFromKey {
-                                chain,
-                                parent_vault_id,
-                                parent_record_id,
-                                child_vault_id,
-                                child_record_id,
-                                hint,
-                            },
-                            sender,
-                        )
-                    }
-                    Procedure::BIP39Generate {
-                        passphrase,
-                        output,
-                        hint,
-                    } => {
-                        let (vault_id, record_id) = self.resolve_location(output);
+//                     if self.vault_exist(child_vault_id).is_none() {
+//                         self.add_new_vault(child_vault_id);
+//                     }
 
-                        if self.vault_exist(vault_id).is_none() {
-                            self.add_new_vault(vault_id);
-                        }
+//                     internal.try_tell(
+//                         InternalMsg::SLIP10DeriveFromKey {
+//                             chain,
+//                             parent_vault_id,
+//                             parent_record_id,
+//                             child_vault_id,
+//                             child_record_id,
+//                             hint,
+//                         },
+//                         sender,
+//                     )
+//                 }
+//                 Procedure::BIP39Generate {
+//                     passphrase,
+//                     output,
+//                     hint,
+//                 } => {
+//                     let (vault_id, record_id) = self.resolve_location(output);
 
-                        internal.try_tell(
-                            InternalMsg::BIP39Generate {
-                                passphrase: passphrase.unwrap_or_else(|| "".into()),
-                                vault_id,
-                                record_id,
-                                hint,
-                            },
-                            sender,
-                        )
-                    }
-                    Procedure::BIP39Recover {
-                        mnemonic,
-                        passphrase,
-                        output,
-                        hint,
-                    } => {
-                        let (vault_id, record_id) = self.resolve_location(output);
+//                     if self.vault_exist(vault_id).is_none() {
+//                         self.add_new_vault(vault_id);
+//                     }
 
-                        if self.vault_exist(vault_id).is_none() {
-                            self.add_new_vault(vault_id);
-                        }
+//                     internal.try_tell(
+//                         InternalMsg::BIP39Generate {
+//                             passphrase: passphrase.unwrap_or_else(|| "".into()),
+//                             vault_id,
+//                             record_id,
+//                             hint,
+//                         },
+//                         sender,
+//                     )
+//                 }
+//                 Procedure::BIP39Recover {
+//                     mnemonic,
+//                     passphrase,
+//                     output,
+//                     hint,
+//                 } => {
+//                     let (vault_id, record_id) = self.resolve_location(output);
 
-                        internal.try_tell(
-                            InternalMsg::BIP39Recover {
-                                mnemonic,
-                                passphrase: passphrase.unwrap_or_else(|| "".into()),
-                                vault_id,
-                                record_id,
-                                hint,
-                            },
-                            sender,
-                        )
-                    }
-                    // Not implemented yet.
-                    Procedure::BIP39MnemonicSentence { .. } => unimplemented!(),
-                    Procedure::Ed25519PublicKey { private_key } => {
-                        let (vault_id, record_id) = self.resolve_location(private_key);
-                        internal.try_tell(InternalMsg::Ed25519PublicKey { vault_id, record_id }, sender)
-                    }
-                    Procedure::Ed25519Sign { private_key, msg } => {
-                        let (vault_id, record_id) = self.resolve_location(private_key);
-                        internal.try_tell(
-                            InternalMsg::Ed25519Sign {
-                                vault_id,
-                                record_id,
-                                msg,
-                            },
-                            sender,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
+//                     if self.vault_exist(vault_id).is_none() {
+//                         self.add_new_vault(vault_id);
+//                     }
 
-impl Receive<InternalResults> for Client {
-    type Msg = ClientMsg;
+//                     internal.try_tell(
+//                         InternalMsg::BIP39Recover {
+//                             mnemonic,
+//                             passphrase: passphrase.unwrap_or_else(|| "".into()),
+//                             vault_id,
+//                             record_id,
+//                             hint,
+//                         },
+//                         sender,
+//                     )
+//                 }
+//                 // Not implemented yet.
+//                 Procedure::BIP39MnemonicSentence { .. } => unimplemented!(),
+//                 Procedure::Ed25519PublicKey { private_key } => {
+//                     let (vault_id, record_id) = self.resolve_location(private_key);
+//                     internal.try_tell(InternalMsg::Ed25519PublicKey { vault_id, record_id }, sender)
+//                 }
+//                 Procedure::Ed25519Sign { private_key, msg } => {
+//                     let (vault_id, record_id) = self.resolve_location(private_key);
+//                     internal.try_tell(
+//                         InternalMsg::Ed25519Sign {
+//                             vault_id,
+//                             record_id,
+//                             msg,
+//                         },
+//                         sender,
+//                     )
+//                 }
+//             }
+//         }
+//     }
+// }
+// }
 
-    fn receive(&mut self, _ctx: &Context<Self::Msg>, msg: InternalResults, sender: Sender) {
-        match msg {
-            InternalResults::ReturnCreateVault(status) => {
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnCreateVault(status), None)
-                    .expect(line_error!());
-            }
-            InternalResults::ReturnCheckRecord(res) => {
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnExistsRecord(res), None)
-                    .expect(line_error!());
-            }
+// impl Receive<InternalResults> for Client {
+//     type Msg = ClientMsg;
 
-            InternalResults::ReturnReadVault(payload, status) => {
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnReadVault(payload, status), None)
-                    .expect(line_error!());
-            }
-            InternalResults::ReturnList(list, status) => {
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnList(list, status), None)
-                    .expect(line_error!());
-            }
-            InternalResults::RebuildCache {
-                id,
-                vaults,
-                store,
-                status,
-            } => {
-                self.clear_cache();
+//     fn receive(&mut self, _ctx: &Context<Self::Msg>, msg: InternalResults, sender: Sender) {
+//         match msg {
+//             InternalResults::ReturnCreateVault(status) => {
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnCreateVault(status), None)
+//                     .expect(line_error!());
+//             }
+//             InternalResults::ReturnCheckRecord(res) => {
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnExistsRecord(res), None)
+//                     .expect(line_error!());
+//             }
 
-                self.rebuild_cache(id, vaults, store);
+//             InternalResults::ReturnReadVault(payload, status) => {
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnReadVault(payload, status), None)
+//                     .expect(line_error!());
+//             }
+//             InternalResults::ReturnList(list, status) => {
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnList(list, status), None)
+//                     .expect(line_error!());
+//             }
+//             InternalResults::RebuildCache {
+//                 id,
+//                 vaults,
+//                 store,
+//                 status,
+//             } => {
+//                 self.clear_cache();
 
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnReadSnap(status), None)
-                    .expect(line_error!());
-            }
-            InternalResults::ReturnWriteVault(status) => {
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnWriteVault(status), None)
-                    .expect(line_error!());
-            }
-            InternalResults::ReturnRevoke(status) => {
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnRevoke(status), None)
-                    .expect(line_error!());
-            }
-            InternalResults::ReturnGarbage(status) => {
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnGarbage(status), None)
-                    .expect(line_error!());
-            }
-            InternalResults::ReturnWriteSnap(status) => {
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnWriteSnap(status), None)
-                    .expect(line_error!());
-            }
+//                 self.rebuild_cache(id, vaults, store);
 
-            InternalResults::ReturnControlRequest(result) => {
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnControlRequest(result), None)
-                    .expect(line_error!());
-            }
-            InternalResults::ReturnClearCache(status) => {
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnClearCache(status), None)
-                    .expect(line_error!());
-            }
-        }
-    }
-}
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnReadSnap(status), None)
+//                     .expect(line_error!());
+//             }
+//             InternalResults::ReturnWriteVault(status) => {
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnWriteVault(status), None)
+//                     .expect(line_error!());
+//             }
+//             InternalResults::ReturnRevoke(status) => {
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnRevoke(status), None)
+//                     .expect(line_error!());
+//             }
+//             InternalResults::ReturnGarbage(status) => {
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnGarbage(status), None)
+//                     .expect(line_error!());
+//             }
+//             InternalResults::ReturnWriteSnap(status) => {
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnWriteSnap(status), None)
+//                     .expect(line_error!());
+//             }
+
+//             InternalResults::ReturnControlRequest(result) => {
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnControlRequest(result), None)
+//                     .expect(line_error!());
+//             }
+//             InternalResults::ReturnClearCache(status) => {
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnClearCache(status), None)
+//                     .expect(line_error!());
+//             }
+//         }
+//     }
+// }

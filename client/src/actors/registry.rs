@@ -6,18 +6,20 @@
 //! The registry actor keeps record of all client actors
 //! bound to a unique `client_id`. [`Client`] actors can
 //! be added, removed or queried for their [`actix::Addr`].
-//! The main purpose is to access client actors
+//! The main purpose is to access client actors.
 
-use actix::{Actor, Addr, Handler, Message, Supervised};
+// TODO - check, if drop needs to be implemented eg. discard existing client
+// actors
+// TODO -
+
+use actix::{Actor, Addr, Context, Handler, Message, Supervised};
 use engine::vault::ClientId;
 use std::collections::HashMap;
 use thiserror::Error as ErrorType;
 
 use crate::state::client::Client;
 
-// re-exported
-
-#[derive(ErrorType)]
+#[derive(Debug, ErrorType)]
 pub enum RegistryError {
     #[error("No Client Present By Id ({0})")]
     NoClientPresentById(String),
@@ -26,33 +28,34 @@ pub enum RegistryError {
     ClientAlreadyPresentById(String),
 }
 
-// message types
+pub struct InsertClient {
+    id: ClientId,
+}
 
-#[derive(Message)]
-#[rtype(return = "()")]
-pub struct InsertClient<R>
-where
-    R: AsRef<ClientId>,
-{
-    id: R,
+impl Message for InsertClient {
+    type Result = Result<Addr<Client>, RegistryError>;
+}
+
+pub struct RemoveClient {
+    id: ClientId,
+}
+
+impl Message for RemoveClient {
+    type Result = Result<(), RegistryError>;
+}
+
+pub struct GetClient {
+    id: ClientId,
+}
+
+impl Message for GetClient {
+    type Result = Option<Addr<Client>>;
 }
 
 #[derive(Message)]
-#[rtype(return = "()")]
-pub struct RemoveClient<R>
-where
-    R: AsRef<ClientId>,
-{
-    id: R,
-}
-
-#[derive(Message)]
-#[rtype(return = "Addr<Client>")]
-pub struct GetClient<R>
-where
-    R: AsRef<ClientId>,
-{
-    id: R,
+#[rtype(result = "bool")]
+pub struct HasClient {
+    id: ClientId,
 }
 
 /// Registry [`Actor`], that owns [`Client`] actors, and manages seem. The Registry
@@ -67,41 +70,56 @@ where
 
 impl<A> Supervised for Registry<A> where A: Actor {}
 
-impl<A> Actor for Registry<A> where A: Actor {}
-
-impl<A, R> Handler<InsertClient<R>> for Registry<A>
+impl<A> Actor for Registry<A>
 where
     A: Actor,
-    R: AsRef<ClientId>,
 {
-    type Result = Result<Addr<A>, RegistryError>;
+    type Context = Context<Self>;
+}
 
-    fn handle(&mut self, msg: InsertClient<R>, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(_) = self.clients.get(msg.id) {
-            return Err(RegistryError::ClientAlreadyPresentById(msg.id));
+impl Handler<HasClient> for Registry<Client> {
+    type Result = bool;
+
+    fn handle(&mut self, msg: HasClient, ctx: &mut Self::Context) -> Self::Result {
+        self.clients.contains_key(&msg.id)
+    }
+}
+
+impl Handler<InsertClient> for Registry<Client> {
+    type Result = Result<Addr<Client>, RegistryError>;
+
+    fn handle(&mut self, msg: InsertClient, ctx: &mut Self::Context) -> Self::Result {
+        if let Some(_) = self.clients.get(&msg.id) {
+            return Err(RegistryError::ClientAlreadyPresentById(msg.id.into()));
         }
 
         self.clients
             .insert(msg.id, Client::new(msg.id).start())
-            .ok_or(RegistryError::ClientAlreadyPresentById())
+            .ok_or(RegistryError::ClientAlreadyPresentById("".to_string()))
     }
 }
 
-impl<A, R> Handler<GetClient<R>> for Registry<A> {
-    type Result = Option<Addr<A>>;
+impl Handler<GetClient> for Registry<Client> {
+    type Result = Option<Addr<Client>>;
 
-    fn handle(&mut self, msg: GetClient<R>, ctx: &mut Self::Context) -> Self::Result {
-        self.clients.get(msg.id)
+    fn handle(&mut self, msg: GetClient, ctx: &mut Self::Context) -> Self::Result {
+        if let Some(client) = self.clients.get(&msg.id) {
+            return Some(client.clone());
+        }
+        None
     }
 }
 
-impl<A, R> Handler<RemoveClient<R>> for Registry<A> {
+impl<A> Handler<RemoveClient> for Registry<A>
+where
+    A: Actor,
+{
     type Result = Result<(), RegistryError>;
 
-    fn handle(&mut self, msg: RemoveClient<R>, ctx: &mut Self::Context) -> Self::Result {
-        match self.clients.remove(msg.id) {
+    fn handle(&mut self, msg: RemoveClient, ctx: &mut Self::Context) -> Self::Result {
+        match self.clients.remove(&msg.id) {
             Some(_) => Ok(()),
-            None => Err(RegistryError::NoClientPresentById(msg.id)),
+            None => Err(RegistryError::NoClientPresentById(msg.id.into())),
         }
     }
 }
@@ -113,15 +131,17 @@ mod tests {
 
     #[actix::test]
     async fn test_insert_client() {
-        let registry = Registry::default().start();
+        let registry = Registry::<Client>::default().start();
 
         for d in 'a'..'z' {
-            assert!(registry
+            let id_str = format!("{}", d).as_str().as_bytes();
+            let n = registry
                 .send(InsertClient {
-                    id: format!("client {}", d).as_str().as_bytes()
+                    id: ClientId::load(id_str).unwrap(),
                 })
-                .await
-                .is_ok());
+                .await;
+
+            assert!(n.is_ok());
         }
     }
 
@@ -130,9 +150,10 @@ mod tests {
         let registry = Registry::default().start();
 
         for d in 'a'..'z' {
+            let id_str = format!("{}", d).as_str().as_bytes();
             assert!(registry
                 .send(InsertClient {
-                    id: format!("client {}", d).as_str().as_bytes()
+                    id: ClientId::load(id_str).unwrap(),
                 })
                 .await
                 .is_ok());
@@ -140,10 +161,10 @@ mod tests {
 
         assert!(registry
             .send(GetClient {
-                id: format!("client {}", 'a').as_str().as_bytes()
+                id: ClientId::load(b"client_path").unwrap(),
             })
             .await
-            .is_some());
+            .is_ok());
     }
 
     #[actix::test]
@@ -151,19 +172,22 @@ mod tests {
         let registry = Registry::default().start();
 
         for d in 'a'..'z' {
+            let id_str = format!("{}", d).as_str().as_bytes();
             assert!(registry
                 .send(InsertClient {
-                    id: format!("client {}", d).as_str().as_bytes()
+                    id: ClientId::load(id_str).unwrap(),
                 })
                 .await
                 .is_ok());
         }
 
-        assert!(registry
+        if let Ok(result) = registry
             .send(RemoveClient {
-                id: format!("client {}", 'a').as_str().as_bytes()
+                id: ClientId::load(b"client_path").unwrap(),
             })
             .await
-            .is_some());
+        {
+            assert!(result.is_ok())
+        }
     }
 }
