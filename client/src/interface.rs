@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use futures::future::RemoteHandle;
-// TODO:
+
+// TODO remove
 use riker::*;
 
 use actix::{Actor, Addr, Supervisor, System, SystemRunner};
@@ -502,7 +503,7 @@ impl<A: Actor> Stronghold<A> {
     }
 }
 
-#[cfg(feature = "communication")]
+#[cfg(feature = "communication_need_update")]
 impl<A: Actor> Stronghold<A> {
     /// Spawn the communication actor and swarm with a pre-existing keypair
     /// Per default, the firewall allows all outgoing, and reject all incoming requests.

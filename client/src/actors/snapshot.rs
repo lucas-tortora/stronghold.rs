@@ -3,7 +3,7 @@
 
 #![allow(clippy::type_complexity)]
 
-use riker::actors::*;
+use actix::{Actor, Handler, Message, SystemService};
 
 use std::path::PathBuf;
 
@@ -14,6 +14,7 @@ use engine::{
 
 use stronghold_utils::GuardDebug;
 
+use crate::actors::{secure::messages as secure_messages, SecureActor};
 use crate::{
     actors::{InternalMsg, SHResults},
     line_error,
@@ -24,11 +25,13 @@ use crate::{
     utils::StatusMessage,
     Provider,
 };
-
+pub use messages::*;
 use std::collections::HashMap;
+use thiserror::Error as DeriveError;
 
 /// Messages used for the Snapshot Actor.
 #[derive(Clone, GuardDebug)]
+#[deprecated]
 pub enum SMsg {
     WriteSnapshot {
         key: snapshot::Key,
@@ -50,105 +53,192 @@ pub enum SMsg {
 
 // new actix impl
 
-impl actix::Actor for Snapshot {}
+mod messages {
 
-// end new actix impl
+    use super::*;
+    // use actix::Message;
 
-/// Actor Factory for the Snapshot.
-impl ActorFactory for Snapshot {
-    fn create() -> Self {
-        Snapshot::new(SnapshotState::default())
+    #[derive(Message)]
+    #[rtype(return = "()")]
+    pub struct WriteSnapshot {
+        pub key: snapshot::Key,
+        pub filename: Option<String>,
+        pub path: Option<PathBuf>,
+    }
+
+    #[derive(Message)]
+    #[rtype(return = "()")]
+    pub struct FillSnapshot {
+        pub data: Box<(HashMap<VaultId, Key<Provider>>, DbView<Provider>, Store)>,
+        pub id: ClientId,
+    }
+
+    pub struct ReadFromSnapshot {
+        pub key: snapshot::Key,
+        pub filename: Option<String>,
+        pub path: Option<PathBuf>,
+        pub id: ClientId,
+        pub fid: Option<ClientId>,
+    }
+
+    impl Message for ReadFromSnapshot {
+        type Result = Result<(), anyhow::Error>;
     }
 }
 
 impl Actor for Snapshot {
-    type Msg = SMsg;
+    type Context = actix::Context<Self>;
+}
 
-    fn recv(&mut self, ctx: &Context<Self::Msg>, msg: Self::Msg, sender: Sender) {
-        self.receive(ctx, msg, sender);
+#[derive(Debug, DeriveError)]
+pub enum SnapshotError {
+    #[error("Could Not Load Snapshot. Try another password")]
+    LoadFailure,
+}
+
+// actix impl
+
+impl Handler<messages::FillSnapshot> for Snapshot {
+    type Result = ();
+
+    fn handle(&mut self, msg: messages::FillSnapshot, ctx: &mut Self::Context) -> Self::Result {
+        self.state.add_data(msg.id, *msg.data);
     }
 }
 
-impl Receive<SMsg> for Snapshot {
-    type Msg = SMsg;
+impl Handler<messages::ReadFromSnapshot> for Snapshot {
+    type Result = Result<(), anyhow::Error>;
 
-    fn receive(&mut self, ctx: &Context<Self::Msg>, msg: Self::Msg, sender: Sender) {
-        match msg {
-            SMsg::FillSnapshot { data, id } => {
-                self.state.add_data(id, *data);
+    fn handle(&mut self, msg: messages::ReadFromSnapshot, ctx: &mut Self::Context) -> Self::Result {
+        let id_str: String = msg.id.into();
+        let cid = msg.fid.unwrap_or(msg.id);
 
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnFillSnap(StatusMessage::OK), None)
-                    .expect(line_error!());
-            }
-            SMsg::ReadFromSnapshot {
-                key,
-                filename,
-                path,
-                id,
-                fid,
-            } => {
-                let id_str: String = id.into();
-                let internal = ctx.select(&format!("/user/internal-{}/", id_str)).expect(line_error!());
-                let cid = if let Some(fid) = fid { fid } else { id };
+        if self.has_data(cid) {
+            let data = self.get_state(cid);
 
-                if self.has_data(cid) {
-                    let data = self.get_state(cid);
+            // load secure actor
+            let secure = SecureActor::from_registry();
+            secure.send(secure_messages::ReloadData {
+                id: cid,
+                data: Box::new(data),
+                status: StatusMessage::OK,
+            });
+        } else {
+            match Snapshot::read_from_snapshot(msg.filename.as_deref(), msg.path.as_deref(), msg.key) {
+                Ok(snapshot) => {
+                    let data = snapshot.get_state(cid);
+                    *self = snapshot;
 
-                    internal.try_tell(
-                        InternalMsg::ReloadData {
-                            id: cid,
-                            data: Box::new(data),
-                            status: StatusMessage::OK,
-                        },
-                        sender,
-                    );
-                } else {
-                    match Snapshot::read_from_snapshot(filename.as_deref(), path.as_deref(), key) {
-                        Ok(mut snapshot) => {
-                            let data = snapshot.get_state(cid);
-
-                            *self = snapshot;
-
-                            internal.try_tell(
-                                InternalMsg::ReloadData {
-                                    id: cid,
-                                    data: Box::new(data),
-                                    status: StatusMessage::OK,
-                                },
-                                sender,
-                            );
-                        }
-                        Err(e) => {
-                            sender
-                                .as_ref()
-                                .expect(line_error!())
-                                .try_tell(
-                                    SHResults::ReturnReadSnap(StatusMessage::Error(format!(
-                                        "{}, Unable to read snapshot. Please try another password.",
-                                        e
-                                    ))),
-                                    None,
-                                )
-                                .expect(line_error!());
-                        }
-                    }
-                };
-            }
-            SMsg::WriteSnapshot { key, filename, path } => {
-                self.write_to_snapshot(filename.as_deref(), path.as_deref(), key)
-                    .expect(line_error!());
-
-                self.state = SnapshotState::default();
-
-                sender
-                    .as_ref()
-                    .expect(line_error!())
-                    .try_tell(SHResults::ReturnWriteSnap(StatusMessage::OK), None)
-                    .expect(line_error!());
+                    // load secure actor
+                    let secure = SecureActor::from_registry();
+                    secure.send(secure_messages::ReloadData {
+                        id: cid,
+                        data: Box::new(data),
+                        status: StatusMessage::OK,
+                    });
+                }
+                Err(e) => {
+                    return Err(anyhow::anyhow!(SnapshotError::LoadFailure).into());
+                }
             }
         }
+
+        Ok(())
     }
 }
+
+impl Handler<messages::WriteSnapshot> for Snapshot {
+    type Result = ();
+
+    fn handle(&mut self, msg: messages::WriteSnapshot, ctx: &mut Self::Context) -> Self::Result {
+        self.write_to_snapshot(msg.filename.as_deref(), msg.path.as_deref(), msg.key)
+            .expect(line_error!());
+
+        self.state = SnapshotState::default();
+    }
+}
+
+// old impl
+// impl Receive<SMsg> for Snapshot {
+//     type Msg = SMsg;
+
+//     fn receive(&mut self, ctx: &Context<Self::Msg>, msg: Self::Msg, sender: Sender) {
+//         match msg {
+//             SMsg::FillSnapshot { data, id } => {
+//                 self.state.add_data(id, *data);
+
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnFillSnap(StatusMessage::OK), None)
+//                     .expect(line_error!());
+//             }
+//             SMsg::ReadFromSnapshot {
+//                 key,
+//                 filename,
+//                 path,
+//                 id,
+//                 fid,
+//             } => {
+//                 let id_str: String = id.into();
+//                 let internal = ctx.select(&format!("/user/internal-{}/", id_str)).expect(line_error!());
+//                 let cid = if let Some(fid) = fid { fid } else { id };
+
+//                 if self.has_data(cid) {
+//                     let data = self.get_state(cid);
+
+//                     internal.try_tell(
+//                         InternalMsg::ReloadData {
+//                             id: cid,
+//                             data: Box::new(data),
+//                             status: StatusMessage::OK,
+//                         },
+//                         sender,
+//                     );
+//                 } else {
+//                     match Snapshot::read_from_snapshot(filename.as_deref(), path.as_deref(), key) {
+//                         Ok(mut snapshot) => {
+//                             let data = snapshot.get_state(cid);
+
+//                             *self = snapshot;
+
+//                             internal.try_tell(
+//                                 InternalMsg::ReloadData {
+//                                     id: cid,
+//                                     data: Box::new(data),
+//                                     status: StatusMessage::OK,
+//                                 },
+//                                 sender,
+//                             );
+//                         }
+//                         Err(e) => {
+//                             sender
+//                                 .as_ref()
+//                                 .expect(line_error!())
+//                                 .try_tell(
+//                                     SHResults::ReturnReadSnap(StatusMessage::Error(format!(
+//                                         "{}, Unable to read snapshot. Please try another password.",
+//                                         e
+//                                     ))),
+//                                     None,
+//                                 )
+//                                 .expect(line_error!());
+//                         }
+//                     }
+//                 };
+//             }
+//             SMsg::WriteSnapshot { key, filename, path } => {
+//                 self.write_to_snapshot(filename.as_deref(), path.as_deref(), key)
+//                     .expect(line_error!());
+
+//                 self.state = SnapshotState::default();
+
+//                 sender
+//                     .as_ref()
+//                     .expect(line_error!())
+//                     .try_tell(SHResults::ReturnWriteSnap(StatusMessage::OK), None)
+//                     .expect(line_error!());
+//             }
+//         }
+//     }
+// }

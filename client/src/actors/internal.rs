@@ -370,6 +370,9 @@ impl Receive<InternalMsg> for InternalActor<Provider> {
         //     InternalMsg::KillInternal => {
         //         ctx.stop(ctx.myself());
         //     }
+
+        // PROGRESS
+
         //     InternalMsg::SLIP10Generate {
         //         vault_id,
         //         record_id,

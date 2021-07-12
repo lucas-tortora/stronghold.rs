@@ -10,7 +10,7 @@
 
 // TODO - check, if drop needs to be implemented eg. discard existing client
 // actors
-// TODO -
+// TODO - use `impl_handler!` macro from crate::actors::secure::impl_handler! for code consistency
 
 use actix::{Actor, Addr, Context, Handler, Message, Supervised};
 use engine::vault::ClientId;
@@ -28,34 +28,39 @@ pub enum RegistryError {
     ClientAlreadyPresentById(String),
 }
 
-pub struct InsertClient {
-    id: ClientId,
-}
+pub mod messages {
 
-impl Message for InsertClient {
-    type Result = Result<Addr<Client>, RegistryError>;
-}
+    use super::*;
 
-pub struct RemoveClient {
-    id: ClientId,
-}
+    pub struct InsertClient {
+        id: ClientId,
+    }
 
-impl Message for RemoveClient {
-    type Result = Result<(), RegistryError>;
-}
+    impl Message for InsertClient {
+        type Result = Result<Addr<Client>, RegistryError>;
+    }
 
-pub struct GetClient {
-    id: ClientId,
-}
+    pub struct RemoveClient {
+        id: ClientId,
+    }
 
-impl Message for GetClient {
-    type Result = Option<Addr<Client>>;
-}
+    impl Message for RemoveClient {
+        type Result = Result<(), RegistryError>;
+    }
 
-#[derive(Message)]
-#[rtype(result = "bool")]
-pub struct HasClient {
-    id: ClientId,
+    pub struct GetClient {
+        id: ClientId,
+    }
+
+    impl Message for GetClient {
+        type Result = Option<Addr<Client>>;
+    }
+
+    #[derive(Message)]
+    #[rtype(result = "bool")]
+    pub struct HasClient {
+        id: ClientId,
+    }
 }
 
 /// Registry [`Actor`], that owns [`Client`] actors, and manages seem. The Registry
@@ -77,18 +82,18 @@ where
     type Context = Context<Self>;
 }
 
-impl Handler<HasClient> for Registry<Client> {
+impl Handler<messages::HasClient> for Registry<Client> {
     type Result = bool;
 
-    fn handle(&mut self, msg: HasClient, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: messages::HasClient, ctx: &mut Self::Context) -> Self::Result {
         self.clients.contains_key(&msg.id)
     }
 }
 
-impl Handler<InsertClient> for Registry<Client> {
+impl Handler<messages::InsertClient> for Registry<Client> {
     type Result = Result<Addr<Client>, RegistryError>;
 
-    fn handle(&mut self, msg: InsertClient, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: messages::InsertClient, ctx: &mut Self::Context) -> Self::Result {
         if let Some(_) = self.clients.get(&msg.id) {
             return Err(RegistryError::ClientAlreadyPresentById(msg.id.into()));
         }
@@ -99,10 +104,10 @@ impl Handler<InsertClient> for Registry<Client> {
     }
 }
 
-impl Handler<GetClient> for Registry<Client> {
+impl Handler<messages::GetClient> for Registry<Client> {
     type Result = Option<Addr<Client>>;
 
-    fn handle(&mut self, msg: GetClient, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: messages::GetClient, ctx: &mut Self::Context) -> Self::Result {
         if let Some(client) = self.clients.get(&msg.id) {
             return Some(client.clone());
         }
@@ -110,13 +115,13 @@ impl Handler<GetClient> for Registry<Client> {
     }
 }
 
-impl<A> Handler<RemoveClient> for Registry<A>
+impl<A> Handler<messages::RemoveClient> for Registry<A>
 where
     A: Actor,
 {
     type Result = Result<(), RegistryError>;
 
-    fn handle(&mut self, msg: RemoveClient, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: messages::RemoveClient, ctx: &mut Self::Context) -> Self::Result {
         match self.clients.remove(&msg.id) {
             Some(_) => Ok(()),
             None => Err(RegistryError::NoClientPresentById(msg.id.into())),
@@ -136,7 +141,7 @@ mod tests {
         for d in 'a'..'z' {
             let id_str = format!("{}", d).as_str().as_bytes();
             let n = registry
-                .send(InsertClient {
+                .send(messages::InsertClient {
                     id: ClientId::load(id_str).unwrap(),
                 })
                 .await;
@@ -152,7 +157,7 @@ mod tests {
         for d in 'a'..'z' {
             let id_str = format!("{}", d).as_str().as_bytes();
             assert!(registry
-                .send(InsertClient {
+                .send(messages::InsertClient {
                     id: ClientId::load(id_str).unwrap(),
                 })
                 .await
@@ -160,7 +165,7 @@ mod tests {
         }
 
         assert!(registry
-            .send(GetClient {
+            .send(messages::GetClient {
                 id: ClientId::load(b"client_path").unwrap(),
             })
             .await
@@ -174,7 +179,7 @@ mod tests {
         for d in 'a'..'z' {
             let id_str = format!("{}", d).as_str().as_bytes();
             assert!(registry
-                .send(InsertClient {
+                .send(messages::InsertClient {
                     id: ClientId::load(id_str).unwrap(),
                 })
                 .await
@@ -182,7 +187,7 @@ mod tests {
         }
 
         if let Ok(result) = registry
-            .send(RemoveClient {
+            .send(messages::RemoveClient {
                 id: ClientId::load(b"client_path").unwrap(),
             })
             .await
