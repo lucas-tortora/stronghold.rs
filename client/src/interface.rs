@@ -1,12 +1,20 @@
 // Copyright 2020-2021 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
+//! Main Stronghold Interface
+//!
+//! All functionality can be accessed from the interface. Functions
+//! are provided in an asynchronous way, and should be run by the
+//! actor's system [`SystemRunner`].
+
+// TODO: add access to runtime of actix
+
 use futures::future::RemoteHandle;
 
-// TODO remove
-use riker::*;
+// // TODO remove
+// use riker::*;
 
-use actix::{Actor, Addr, Supervisor, System, SystemRunner};
+use actix::{Actor, Addr, Supervisor, System, SystemRunner, SystemService};
 
 // use futures::{
 //     channel::mpsc::{channel, Receiver, Sender},
@@ -60,9 +68,9 @@ where
     A: Actor,
 {
     pub system: Option<SystemRunner>,
-    registry: Addr<Registry<Client>>,
+    registry: Addr<Registry>,
     target: Addr<Client>,
-    secure: Addr<SecureActor>,
+    secure: Addr<SecureActor<crate::internals::Provider>>,
 
     #[cfg(feature = "communication")]
     communication_actor: Option<Addr<A>>,
@@ -71,6 +79,14 @@ where
 impl<A: Actor> Stronghold<A> {
     /// Initializes a new instance of the system.  Sets up the first client actor. Accepts an optional [`SystemRunner`], the first
     /// client_path: `Vec<u8>` and any `StrongholdFlags` which pertain to the first actor.
+
+    /// IDEAS
+    ///
+    /// - The [`SystemRunner`] is not being used directly by stronghold, but is being initialized
+    ///   on the first run.
+    /// - The initialization function can be made asynchronous as well, getting rid of internal
+    ///   explicit blocking
+    /// -
     pub fn init_stronghold_system(
         system: Option<SystemRunner>,
         client_path: Vec<u8>,
@@ -80,13 +96,16 @@ impl<A: Actor> Stronghold<A> {
         let client_id =
             ClientId::load_from_path(&client_path, &client_path).expect(crate::Error::IDError.to_string().as_str());
         let runner = system.unwrap_or_else(|| System::new());
-        let registry = Supervisor::start(|_| Registry::default());
+
+        // the registry will be run as a system service
+        let registry = Registry::from_registry();
         let snapshot = Snapshot::new(SnapshotState::default()).start();
         let target = match runner.block_on(registry.send(InsertClient { id: client_id }))? {
             Ok(addr) => addr,
             Err(e) => return Err(anyhow::anyhow!(e)),
         };
 
+        // start secure actor
         let secure = SecureActor::default().start();
 
         Ok(Self {
@@ -99,6 +118,12 @@ impl<A: Actor> Stronghold<A> {
             communication_actor: None,
         })
     }
+
+    // /// Returns non-mutable access to the underlying executor runtime
+    // /// to eg. drive [`Future`]s.
+    // pub fn get_executor_runtime(&self) -> Option<&SystemRunner> {
+    //     self.system.as_ref()
+    // }
 
     /// Spawns a new set of actors for the Stronghold system. Accepts the client_path: `Vec<u8>` and the options:
     /// `StrongholdFlags`
@@ -122,7 +147,7 @@ impl<A: Actor> Stronghold<A> {
                         };
                     }
 
-                    // shut down secure actor
+                    // shut down secure actor and restart
                     self.secure.send(secure_messages::Terminate).await;
                     self.secure = SecureActor::default().start();
                 }
@@ -161,6 +186,10 @@ impl<A: Actor> Stronghold<A> {
         hint: RecordHint,
         _options: Vec<VaultFlags>,
     ) -> StatusMessage {
+        // actix reference implementation
+
+        // self.target.send
+
         let vault_path = &location.vault_path();
         let vault_path = vault_path.to_vec();
 

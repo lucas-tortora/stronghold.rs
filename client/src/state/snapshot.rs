@@ -16,6 +16,7 @@ use std::path::Path;
 
 use std::collections::HashMap;
 
+#[derive(Default)]
 pub struct Snapshot {
     pub state: SnapshotState,
 }

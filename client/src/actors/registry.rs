@@ -6,18 +6,18 @@
 //! The registry actor keeps record of all client actors
 //! bound to a unique `client_id`. [`Client`] actors can
 //! be added, removed or queried for their [`actix::Addr`].
-//! The main purpose is to access client actors.
+//! The registry can also be queried for the snapshot actor.
 
-// TODO - check, if drop needs to be implemented eg. discard existing client
-// actors
+// TODO - check, if drop needs to be implemented eg. discard existing client actors
 // TODO - use `impl_handler!` macro from crate::actors::secure::impl_handler! for code consistency
+// TODO - decide between generalization, or direct use of clients (actors) and snapshot actor
 
-use actix::{Actor, Addr, Context, Handler, Message, Supervised};
+use actix::{Actor, Addr, Context, Handler, Message, Supervised, SystemService, WeakAddr};
 use engine::vault::ClientId;
 use std::collections::HashMap;
 use thiserror::Error as ErrorType;
 
-use crate::state::client::Client;
+use crate::state::{client::Client, snapshot::Snapshot};
 
 #[derive(Debug, ErrorType)]
 pub enum RegistryError {
@@ -33,7 +33,7 @@ pub mod messages {
     use super::*;
 
     pub struct InsertClient {
-        id: ClientId,
+        pub id: ClientId,
     }
 
     impl Message for InsertClient {
@@ -41,7 +41,7 @@ pub mod messages {
     }
 
     pub struct RemoveClient {
-        id: ClientId,
+        pub id: ClientId,
     }
 
     impl Message for RemoveClient {
@@ -49,7 +49,7 @@ pub mod messages {
     }
 
     pub struct GetClient {
-        id: ClientId,
+        pub id: ClientId,
     }
 
     impl Message for GetClient {
@@ -59,30 +59,40 @@ pub mod messages {
     #[derive(Message)]
     #[rtype(result = "bool")]
     pub struct HasClient {
-        id: ClientId,
+        pub id: ClientId,
+    }
+
+    pub struct GetSnapshot {
+        pub id: ClientId,
+    }
+
+    impl Message for GetSnapshot {
+        type Result = Option<WeakAddr<Snapshot>>;
     }
 }
 
-/// Registry [`Actor`], that owns [`Client`] actors, and manages seem. The Registry
+/// Registry [`Actor`], that owns [`Client`] actors, and manages them. The registry
 /// can be modified
 #[derive(Default)]
-pub struct Registry<A>
-where
-    A: Actor,
-{
-    clients: HashMap<ClientId, Addr<A>>,
+pub struct Registry {
+    clients: HashMap<ClientId, Addr<Client>>,
+    snapshot: Option<WeakAddr<Snapshot>>,
 }
 
-impl<A> Supervised for Registry<A> where A: Actor {}
+impl Supervised for Registry {
+    // TODO check, if certains functions need to be overidden
+}
 
-impl<A> Actor for Registry<A>
-where
-    A: Actor,
-{
+impl Actor for Registry {
     type Context = Context<Self>;
+    // TODO check, if certain functions need to be overidden
 }
 
-impl Handler<messages::HasClient> for Registry<Client> {
+/// For synchronized access across multiple clients, the [`Registry`]
+/// will run as a service.
+impl SystemService for Registry {}
+
+impl Handler<messages::HasClient> for Registry {
     type Result = bool;
 
     fn handle(&mut self, msg: messages::HasClient, ctx: &mut Self::Context) -> Self::Result {
@@ -90,7 +100,7 @@ impl Handler<messages::HasClient> for Registry<Client> {
     }
 }
 
-impl Handler<messages::InsertClient> for Registry<Client> {
+impl Handler<messages::InsertClient> for Registry {
     type Result = Result<Addr<Client>, RegistryError>;
 
     fn handle(&mut self, msg: messages::InsertClient, ctx: &mut Self::Context) -> Self::Result {
@@ -104,7 +114,7 @@ impl Handler<messages::InsertClient> for Registry<Client> {
     }
 }
 
-impl Handler<messages::GetClient> for Registry<Client> {
+impl Handler<messages::GetClient> for Registry {
     type Result = Option<Addr<Client>>;
 
     fn handle(&mut self, msg: messages::GetClient, ctx: &mut Self::Context) -> Self::Result {
@@ -115,10 +125,7 @@ impl Handler<messages::GetClient> for Registry<Client> {
     }
 }
 
-impl<A> Handler<messages::RemoveClient> for Registry<A>
-where
-    A: Actor,
-{
+impl Handler<messages::RemoveClient> for Registry {
     type Result = Result<(), RegistryError>;
 
     fn handle(&mut self, msg: messages::RemoveClient, ctx: &mut Self::Context) -> Self::Result {
@@ -129,6 +136,14 @@ where
     }
 }
 
+impl Handler<messages::GetSnapshot> for Registry {
+    type Result = Option<WeakAddr<Snapshot>>;
+
+    fn handle(&mut self, msg: messages::GetSnapshot, ctx: &mut Self::Context) -> Self::Result {
+        self.snapshot
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -136,7 +151,7 @@ mod tests {
 
     #[actix::test]
     async fn test_insert_client() {
-        let registry = Registry::<Client>::default().start();
+        let registry = Registry::default().start();
 
         for d in 'a'..'z' {
             let id_str = format!("{}", d).as_str().as_bytes();

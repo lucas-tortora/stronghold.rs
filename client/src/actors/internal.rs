@@ -705,6 +705,8 @@ impl Receive<InternalMsg> for InternalActor<Provider> {
         //             )
         //         }
         //     }
+
+        //    THIS MESSAGE HANDLER HAS ALREADY BEEN IMPLEMENTED
         //     InternalMsg::FillSnapshot { client } => {
         //         let snapshot = ctx.select("/user/snapshot/").expect(line_error!());
 

@@ -3,7 +3,7 @@
 
 #![allow(clippy::type_complexity)]
 
-use actix::{Actor, Handler, Message, SystemService};
+use actix::{Actor, Handler, Message, Supervised, System, SystemService};
 
 use std::path::PathBuf;
 
@@ -97,6 +97,8 @@ pub enum SnapshotError {
 }
 
 // actix impl
+impl Supervised for Snapshot {}
+impl SystemService for Snapshot {}
 
 impl Handler<messages::FillSnapshot> for Snapshot {
     type Result = ();

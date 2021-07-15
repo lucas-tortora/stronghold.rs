@@ -1,7 +1,7 @@
 // Copyright 2020-2021 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
-use riker::actors::*;
+// use riker::actors::*;
 
 use crate::{line_error, utils::LoadFromPath, Location, RecordHint, Stronghold};
 use crypto::macs::hmac::HMAC_SHA512;
@@ -12,11 +12,11 @@ fn setup_stronghold<A>() -> Stronghold<A>
 where
     A: actix::Actor,
 {
-    let sys = ActorSystem::new().unwrap();
+    // let sys = ActorSystem::new().unwrap();
 
     let client_path = b"test".to_vec();
 
-    Stronghold::init_stronghold_system(sys, client_path, vec![])
+    Stronghold::init_stronghold_system(None, client_path, vec![])
 }
 
 // test basic read and write.
