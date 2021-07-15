@@ -7,7 +7,6 @@ mod client;
 #[deprecated]
 mod internal;
 
-mod clientactix;
 mod registry;
 mod secure;
 mod snapshot;
