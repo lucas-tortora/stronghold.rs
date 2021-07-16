@@ -63,17 +63,19 @@ pub enum VaultError {
     AccessError,
 }
 
-/// Message types for [`SecureActor`]
+/// Message types for [`SecureClientActor`]
 pub mod messages {
 
     use super::*;
 
-    #[derive(Message, Clone, GuardDebug)]
-    #[rtype(return = "()")]
+    #[derive(Clone, GuardDebug)]
     pub struct Terminate;
 
-    #[derive(Message, Clone, GuardDebug)]
-    #[rtype(return = "()")]
+    impl Message for Terminate {
+        type Result = ();
+    }
+
+    #[derive(Clone, GuardDebug)]
     pub struct ReloadData {
         pub id: ClientId,
 
@@ -84,11 +86,18 @@ pub mod messages {
         pub status: StatusMessage,
     }
 
-    #[derive(Message, Clone, GuardDebug)]
-    #[rtype(return = "()")]
+    impl Message for ReloadData {
+        type Result = ();
+    }
+
+    #[derive(Clone, GuardDebug)]
     pub struct CreateVault {
         pub vault_id: VaultId,
         pub record_id: RecordId,
+    }
+
+    impl Message for CreateVault {
+        type Result = ();
     }
 
     #[derive(Clone, GuardDebug)]
@@ -161,14 +170,29 @@ pub mod messages {
         type Result = Result<(), anyhow::Error>;
     }
 
-    #[derive(Message, Clone, GuardDebug)]
-    #[rtype(return = "()")]
+    #[derive(Clone, GuardDebug)]
     pub struct KillInternal;
 
-    #[derive(Message, Clone, GuardDebug)]
-    #[rtype(return = "()")]
+    impl Message for KillInternal {
+        type Result = ();
+    }
+
+    #[derive(Clone, GuardDebug)]
     pub struct FillSnapshot {
         pub client: Client,
+    }
+
+    impl Message for FillSnapshot {
+        type Result = ();
+    }
+
+    #[derive(Clone, GuardDebug)]
+    pub struct CheckVault {
+        pub vault_path: Vec<u8>,
+    }
+
+    impl Message for CheckVault {
+        type Result = Result<(), anyhow::Error>;
     }
 }
 
@@ -297,7 +321,9 @@ macro_rules! impl_handler {
 }
 
 // #[derive(Default)]
-pub struct SecureActor<P>
+
+/// TODO You see this comment? Rename to `ClientActor`
+pub struct SecureClientActor<P>
 where
     P: BoxProvider + Send + Sync + Clone + 'static + Unpin, /* UNPIN has been added. see Provider for support. */
 {
@@ -311,7 +337,7 @@ where
     db: DbView<P>,
 }
 
-impl<P> Actor for SecureActor<P>
+impl<P> Actor for SecureClientActor<P>
 where
     P: BoxProvider + Send + Sync + Clone + 'static + Unpin, /* UNPIN has been added. see Provider for support. */
 {
@@ -319,7 +345,7 @@ where
 }
 
 /// Make the [`SecureActor'] failure resistant
-impl<P> Supervised for SecureActor<P> where
+impl<P> Supervised for SecureClientActor<P> where
     P: BoxProvider + Send + Sync + Clone + 'static + Unpin /* UNPIN has been added. see Provider for support. */
 {
 }
@@ -416,6 +442,11 @@ impl_handler!(messages::ReadSnapshot, Result<(), anyhow::Error>, (self, msg, ctx
 
     // call read from snapshot from snapshot actor
     todo!()
+});
+
+impl_handler!(messages::CheckVault, Result<(), anyhow::Error>, (self, msg, ctx), {
+    let vid = self.derive_vault_id(msg.vault_path);
+    self.vault_exist(vid).ok_or(|e| anyhow::anyhow!(e))
 });
 
 // ----
@@ -603,11 +634,11 @@ impl_handler!(procedures::Ed25519PublicKey, Result<crate::ProcResult, anyhow::Er
                                 //     sender.clone(),
                                 // );
 
-                                // is
+                                // the client actor will interupt the control flow
+                                // but could this be an option to return an error
                                 return Err(engine::Error::CryptoError(
                                     crypto::Error::BufferSize {has : raw.len(),needs : 32, name: "data buffer" }));
 
-                                    // ProcResult::Ed25519PublicKey(ResultMessage::Error("Incorrect number of key bytes".into())));
                             }
                             raw.truncate(32);
                             let mut bs = [0; 32];
@@ -699,6 +730,5 @@ impl_handler!(procedures::Ed25519Sign, Result <crate::ProcResult, anyhow::Error>
 
 #[cfg(test)]
 mod tests {
-
     // TODO
 }

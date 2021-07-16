@@ -277,8 +277,11 @@ impl From<ProcResult> for SerdeProcResult {
 #[derive(Clone, GuardDebug, Serialize, Deserialize)]
 #[cfg_attr(feature = "communication", derive(RequestPermissions))]
 pub enum SHRequest {
+    #[deprecated]
+    // moved to SecureClientActor
     // check if vault exists.
     CheckVault(Vec<u8>),
+
     // check if record exists.
     CheckRecord {
         location: Location,

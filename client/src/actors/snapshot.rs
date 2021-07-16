@@ -120,6 +120,7 @@ impl Handler<messages::ReadFromSnapshot> for Snapshot {
 
             // load secure actor
             let secure = SecureActor::from_registry();
+
             secure.send(secure_messages::ReloadData {
                 id: cid,
                 data: Box::new(data),
