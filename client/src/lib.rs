@@ -93,4 +93,7 @@ pub enum Error {
 
     #[error("Path Error: ({0})")]
     PathError(String),
+
+    #[error("Keystore Access Error: ({0})")]
+    KeyStoreError(String),
 }

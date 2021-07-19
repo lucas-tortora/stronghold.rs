@@ -8,7 +8,7 @@
 
 // TODO - move functions from internal / client
 
-use crate::{
+pub use crate::{
     internals::Provider,
     state::{
         client::{Client, Store},
@@ -62,6 +62,10 @@ pub enum VaultError {
 /// Message types for [`SecureClientActor`]
 pub mod messages {
 
+    use std::time::Duration;
+
+    use crate::Location;
+
     use super::*;
 
     #[derive(Clone, GuardDebug)]
@@ -91,8 +95,9 @@ pub mod messages {
 
     #[derive(Clone, GuardDebug)]
     pub struct CreateVault {
-        pub vault_id: VaultId,
-        pub record_id: RecordId,
+        pub location: Location,
+        // pub vault_id: VaultId,
+        // pub record_id: RecordId,
     }
 
     impl Message for CreateVault {
@@ -101,8 +106,10 @@ pub mod messages {
 
     #[derive(Clone, GuardDebug)]
     pub struct WriteToVault {
-        pub vault_id: VaultId,
-        pub record_id: RecordId,
+        // pub vault_id: VaultId,
+        // pub record_id: RecordId,
+        pub location: Location,
+
         pub payload: Vec<u8>,
         pub hint: RecordHint,
     }
@@ -185,6 +192,12 @@ pub mod messages {
 
     impl Message for CheckVault {
         type Result = Result<(), anyhow::Error>;
+    }
+
+    pub struct WriteToStore {
+        location: Location,
+        payload: Vec<u8>,
+        lifetime: Option<Duration>,
     }
 }
 
@@ -315,22 +328,6 @@ macro_rules! impl_handler {
     }
 }
 
-// pub struct SecureClientActor<P>
-// where
-//     P: BoxProvider + Send + Sync + Clone + 'static + Unpin, /* UNPIN has been added. see Provider for support. */
-// {
-//     // this is a remnant of internal actor.
-//     // since secure actor shall synchronize working
-//     // and writing secrets across various clients, this might not be needed
-//     // here. The client_id was used to get a reference to the respective
-//     // actor.
-//     // client_id: ClientId,
-//     client: Client,
-
-//     keystore: KeyStore<P>,
-//     db: DbView<P>,
-// }
-
 impl<P> Actor for SecureClient<P>
 where
     P: BoxProvider + Send + Sync + Clone + 'static + Unpin, /* UNPIN has been added. see Provider for support. */
@@ -344,21 +341,6 @@ impl<P> Supervised for SecureClient<P> where
 {
 }
 
-// impl<P> SecureClient<P>
-// where
-//     P: BoxProvider + Send + Sync + Clone + 'static + Unpin,
-// {
-//     pub fn new(client_id: ClientId) -> Self {
-//         SecureClient {
-//             client: Client::new(client_id),
-//             keystore: KeyStore::new(),
-//             db: DbView::new(),
-//         }
-//     }
-// }
-
-// impl<P> SystemService for SecureActor<P> where P: BoxProvider + Send + Sync + Clone + 'static {}
-
 impl_handler!(messages::Terminate, (), (self, msg, ctx), {
     ctx.stop();
 });
@@ -369,8 +351,10 @@ impl_handler!(messages::ClearCache, Result<(), anyhow::Error>, (self, msg, ctx),
 });
 
 impl_handler!(messages::CreateVault, (), (self, msg, ctx), {
-    let key = self.keystore.create_key(msg.vault_id);
-    self.db.init_vault(&key, msg.vault_id); // potentially produces an error
+    let (vault_id, _) = self.resolve_location(msg.location);
+
+    let key = self.keystore.create_key(vault_id);
+    self.db.init_vault(&key, vault_id); // potentially produces an error
 });
 
 impl_handler!(messages::CheckRecord, bool, (self, msg, ctx), {
@@ -384,10 +368,13 @@ impl_handler!(messages::CheckRecord, bool, (self, msg, ctx), {
 });
 
 impl_handler!(messages::WriteToVault, Result<(), anyhow::Error>, (self, msg, ctx), {
-    return match self.keystore.get_key(msg.vault_id) {
+
+    let (vault_id, record_id) = self.resolve_location(msg.location);
+
+    return match self.keystore.get_key(vault_id) {
         Some(key) => {
-            self.keystore.insert_key(msg.vault_id, key);
-            self.db.write(&key, msg.vault_id, msg.record_id, &msg.payload, msg.hint).map_err(|e| anyhow::anyhow!(e))
+            self.keystore.insert_key(vault_id, key);
+            self.db.write(&key, vault_id, record_id, &msg.payload, msg.hint).map_err(|e| anyhow::anyhow!(e))
         }
         None => {
             Err(anyhow::anyhow!(VaultError::NotExisting))
@@ -440,10 +427,8 @@ impl_handler!(messages::ReloadData<T>, (), (self, msg, ctx), {
     self.keystore.rebuild_keystore(keystore);
     self.db = state;
 
-    // TODO / FIXME : client contains state, the secure actor has a reference
-    // to it.
-    self.client.clear_cache();
-    self.client.rebuild_cache(self.client.client_id, vids, store);
+    self.clear_cache();
+    self.rebuild_cache(self.client_id, vids, store);
 });
 
 impl_handler!(messages::ReadSnapshot, Result<(), anyhow::Error>, (self, msg, ctx),  {
@@ -454,8 +439,8 @@ impl_handler!(messages::ReadSnapshot, Result<(), anyhow::Error>, (self, msg, ctx
 });
 
 impl_handler!(messages::CheckVault, Result<(), anyhow::Error>, (self, msg, ctx), {
-    let vid = self.client.derive_vault_id(msg.vault_path);
-    self.client.vault_exist(vid).ok_or(anyhow::anyhow!(VaultError::NotExisting));
+    let vid = self.derive_vault_id(msg.vault_path);
+    self.vault_exist(vid).ok_or(anyhow::anyhow!(VaultError::NotExisting));
     Ok(())
 
 });
@@ -493,12 +478,11 @@ impl_handler!(procedures::SLIP10DeriveFromSeed, Result<crate::ProcResult, anyhow
             let dk_key = if !self.keystore.vault_exists(msg.key_vault_id) {
                 let key = self.keystore.create_key(msg.key_vault_id);
                 self.db.init_vault(&key, msg.key_vault_id).map_err(|e| anyhow::anyhow!(e))?;
-
-                             key
+                key
 
             } else {
                 self.keystore.get_key(msg.key_vault_id).ok_or(
-                    Err(anyhow::anyhow!(""))
+                    Err::<crate::ProcResult, anyhow::Error>(anyhow::anyhow!(crate::Error::KeyStoreError("".into())))
                 ).unwrap()
             };
 
@@ -514,7 +498,7 @@ impl_handler!(procedures::SLIP10DeriveFromSeed, Result<crate::ProcResult, anyhow
                 Ok(data)
 
             });
-            Ok(ProcResult::SLIP10Derive(ResultMessage::Ok(vec![0u8; 32].into()))) // should contain dk.chain_code()
+            Ok(ProcResult::SLIP10Derive(ResultMessage::Ok([0u8; 32]))) // should contain dk.chain_code()
         }
 
         None => {
@@ -725,7 +709,7 @@ impl_handler!(procedures::Ed25519Sign, Result <crate::ProcResult, anyhow::Error>
                         // .expect(line_error!());
 
                         // TODO
-                        Ok(ProcResult::Ed25519Sign(ResultMessage::Ok(sig.to_bytes())))
+                        Ok(ProcResult::Ed25519Sign(ResultMessage::Ok([0u8; 64]))) //   must return sig.to_bytes())))
                 } else {
                     // client.try_tell(
                     //     ClientMsg::InternalResults(InternalResults::ReturnControlRequest(ProcResult::Ed25519Sign(

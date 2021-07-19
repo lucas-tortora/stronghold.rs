@@ -28,7 +28,7 @@ use zeroize::Zeroize;
 use crate::{
     actors::{
         secure_messages, GetClient, HasClient, InsertClient, InternalActor, ProcResult, Procedure, Registry, SHRequest,
-        SHResults, SecureClientActor,
+        SHResults, SecureClient,
     },
     internals, line_error,
     state::{
@@ -71,7 +71,7 @@ where
     // the api. Since the user must provide it's own runtime.
     // pub system: Option<SystemRunner>,
     registry: Addr<Registry>,
-    target: Addr<SecureClientActor<internals::Provider>>, // check dependency on provider
+    target: Addr<SecureClient<internals::Provider>>, // check dependency on provider
 
     #[cfg(feature = "communication")]
     communication_actor: Option<Addr<A>>,
@@ -176,18 +176,11 @@ impl<A: Actor> Stronghold<A> {
         hint: RecordHint,
         _options: Vec<VaultFlags>,
     ) -> StatusMessage {
-        use crate::actors::secure_messages::{CheckVault, WriteToVault};
+        // TODO move to top
+        use crate::actors::secure_messages::{CheckVault, CreateVault, WriteToVault};
 
         let vault_path = &location.vault_path();
         let vault_path = vault_path.to_vec();
-
-        let (vault_id, record_id) = match location {
-            Location::Generic {
-                record_path,
-                vault_path,
-            } => {}
-            Location::Counter { counter, vault_path } => {}
-        };
 
         // new actix impl
         match self.target.send(CheckVault { vault_path }).await {
@@ -197,69 +190,101 @@ impl<A: Actor> Stronghold<A> {
 
                     self.target
                         .send(WriteToVault {
-                            vault_id,
-                            record_id,
+                            // vault_id,
+                            // record_id,
+                            location,
                             payload,
                             hint,
                         })
                         .await;
                 }
-                Err(_) => { // does not exist
+                Err(_) => {
+                    // does not exist
+
+                    match self
+                        .target
+                        .send(CreateVault {
+                            location: location.clone(),
+                        })
+                        .await
+                    {
+                        Ok(_) => {
+                            // write to vault
+
+                            if let Ok(result) = self
+                                .target
+                                .send(WriteToVault {
+                                    location,
+                                    payload,
+                                    hint,
+                                })
+                                .await
+                            {
+                            } else {
+                                return StatusMessage::Error("Error Writing data".into());
+                            }
+                        }
+                        Err(e) => {
+                            return StatusMessage::Error("Cannot create new vault".into());
+                        }
+                    }
                 }
             },
             Err(_) => {}
         }
 
-        // old riker impl
-        if let SHResults::ReturnExistsVault(b) =
-            ask(&self.system, &self.target, SHRequest::CheckVault(vault_path.clone())).await
-        {
-            // check if vault exists
-            if b {
-                if let SHResults::ReturnWriteVault(status) = ask(
-                    &self.system,
-                    &self.target,
-                    SHRequest::WriteToVault {
-                        location: location.clone(),
-                        payload: payload.clone(),
-                        hint,
-                    },
-                )
-                .await
-                {
-                    return status;
-                } else {
-                    return StatusMessage::Error("Error Writing data".into());
-                };
-            } else {
-                // no vault so create new one before writing.
-                if let SHResults::ReturnCreateVault(status) =
-                    ask(&self.system, &self.target, SHRequest::CreateNewVault(location.clone())).await
-                {
-                    status
-                } else {
-                    return StatusMessage::Error("Invalid Message".into());
-                };
-
-                if let SHResults::ReturnWriteVault(status) = ask(
-                    &self.system,
-                    &self.target,
-                    SHRequest::WriteToVault {
-                        location,
-                        payload,
-                        hint,
-                    },
-                )
-                .await
-                {
-                    return status;
-                } else {
-                    return StatusMessage::Error("Error Writing data".into());
-                };
-            }
-        };
-
         StatusMessage::Error("Failed to write the data".into())
+
+        // old riker impl
+        // if let SHResults::ReturnExistsVault(b) =
+        //     ask(&self.system, &self.target, SHRequest::CheckVault(vault_path.clone())).await
+        // {
+        //     // check if vault exists
+        //     if b {
+        //         if let SHResults::ReturnWriteVault(status) = ask(
+        //             &self.system,
+        //             &self.target,
+        //             SHRequest::WriteToVault {
+        //                 location: location.clone(),
+        //                 payload: payload.clone(),
+        //                 hint,
+        //             },
+        //         )
+        //         .await
+        //         {
+        //             return status;
+        //         } else {
+        //             return StatusMessage::Error("Error Writing data".into());
+        //         };
+        //     } else {
+        //         // no vault so create new one before writing.
+        //         if let SHResults::ReturnCreateVault(status) =
+        //             ask(&self.system, &self.target, SHRequest::CreateNewVault(location.clone())).await
+        //         {
+        //             status
+        //         } else {
+        //             return StatusMessage::Error("Invalid Message".into());
+        //         };
+
+        //         if let SHResults::ReturnWriteVault(status) = ask(
+        //             &self.system,
+        //             &self.target,
+        //             SHRequest::WriteToVault {
+        //                 location,
+        //                 payload,
+        //                 hint,
+        //             },
+        //         )
+        //         .await
+        //         {
+        //             return status;
+        //         } else {
+        //             return StatusMessage::Error("Error Writing data".into());
+        //         };
+        //     }
+        // };
+
+        // StatusMessage::Error("Failed to write the data".into())
     }
 
     /// Writes data into an insecure cache.  This method, accepts a `Location`, a `Vec<u8>` and an optional `Duration`.
@@ -272,6 +297,11 @@ impl<A: Actor> Stronghold<A> {
         payload: Vec<u8>,
         lifetime: Option<Duration>,
     ) -> StatusMessage {
+        // TODO move to top
+        use crate::actors::secure_messages::{CheckVault, CreateVault, WriteToVault};
+
+        self.target.send(msg)
+
         let res: SHResults = ask(
             &self.system,
             &self.target,

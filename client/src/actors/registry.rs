@@ -19,7 +19,7 @@ use thiserror::Error as ErrorType;
 
 use crate::{internals, state::snapshot::Snapshot};
 
-use super::SecureClientActor;
+use crate::actors::SecureClient;
 
 #[derive(Debug, ErrorType)]
 pub enum RegistryError {
@@ -39,7 +39,7 @@ pub mod messages {
     }
 
     impl Message for InsertClient {
-        type Result = Result<Addr<SecureClientActor<internals::Provider>>, RegistryError>;
+        type Result = Result<Addr<SecureClient<internals::Provider>>, RegistryError>;
     }
 
     pub struct RemoveClient {
@@ -55,7 +55,7 @@ pub mod messages {
     }
 
     impl Message for GetClient {
-        type Result = Option<Addr<SecureClientActor<internals::Provider>>>;
+        type Result = Option<Addr<SecureClient<internals::Provider>>>;
     }
 
     #[derive(Message)]
@@ -77,7 +77,7 @@ pub mod messages {
 /// can be modified
 #[derive(Default)]
 pub struct Registry {
-    clients: HashMap<ClientId, Addr<SecureClientActor<internals::Provider>>>,
+    clients: HashMap<ClientId, Addr<SecureClient<internals::Provider>>>,
     snapshot: Option<WeakAddr<Snapshot>>,
 }
 
@@ -100,7 +100,7 @@ impl Handler<messages::HasClient> for Registry {
 }
 
 impl Handler<messages::InsertClient> for Registry {
-    type Result = Result<Addr<SecureClientActor<internals::Provider>>, RegistryError>;
+    type Result = Result<Addr<SecureClient<internals::Provider>>, RegistryError>;
 
     fn handle(&mut self, msg: messages::InsertClient, ctx: &mut Self::Context) -> Self::Result {
         if let Some(_) = self.clients.get(&msg.id) {
@@ -108,13 +108,13 @@ impl Handler<messages::InsertClient> for Registry {
         }
 
         self.clients
-            .insert(msg.id, SecureClientActor::new(msg.id).start())
+            .insert(msg.id, SecureClient::new(msg.id).start())
             .ok_or(RegistryError::ClientAlreadyPresentById("".to_string()))
     }
 }
 
 impl Handler<messages::GetClient> for Registry {
-    type Result = Option<Addr<SecureClientActor<internals::Provider>>>;
+    type Result = Option<Addr<SecureClient<internals::Provider>>>;
 
     fn handle(&mut self, msg: messages::GetClient, ctx: &mut Self::Context) -> Self::Result {
         if let Some(client) = self.clients.get(&msg.id) {
