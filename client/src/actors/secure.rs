@@ -64,6 +64,8 @@ pub mod messages {
 
     use std::time::Duration;
 
+    use futures::io::Write;
+
     use crate::Location;
 
     use super::*;
@@ -194,10 +196,15 @@ pub mod messages {
         type Result = Result<(), anyhow::Error>;
     }
 
+    #[derive(Clone, GuardDebug)]
     pub struct WriteToStore {
-        location: Location,
-        payload: Vec<u8>,
-        lifetime: Option<Duration>,
+        pub location: Location,
+        pub payload: Vec<u8>,
+        pub lifetime: Option<Duration>,
+    }
+
+    impl Message for WriteToStore {
+        type Result = Result<(), anyhow::Error>;
     }
 }
 
@@ -443,6 +450,13 @@ impl_handler!(messages::CheckVault, Result<(), anyhow::Error>, (self, msg, ctx),
     self.vault_exist(vid).ok_or(anyhow::anyhow!(VaultError::NotExisting));
     Ok(())
 
+});
+
+impl_handler!(messages::WriteToStore, Result<(), anyhow::Error>, (self, msg, ctx), {
+    let (vault_id, _) = self.resolve_location(msg.location);
+    self.write_to_store(vault_id.into(), msg.payload, msg.lifetime);
+
+    Ok(())
 });
 
 // ----

@@ -298,26 +298,37 @@ impl<A: Actor> Stronghold<A> {
         lifetime: Option<Duration>,
     ) -> StatusMessage {
         // TODO move to top
-        use crate::actors::secure_messages::{CheckVault, CreateVault, WriteToVault};
+        use crate::actors::secure_messages::WriteToStore;
 
-        self.target.send(msg)
-
-        let res: SHResults = ask(
-            &self.system,
-            &self.target,
-            SHRequest::WriteToStore {
+        match self
+            .target
+            .send(WriteToStore {
                 location,
                 payload,
                 lifetime,
-            },
-        )
-        .await;
-
-        if let SHResults::ReturnWriteStore(status) = res {
-            status
-        } else {
-            StatusMessage::Error("Failed to write to the store".into())
+            })
+            .await
+        {
+            Ok(status) => status.into(),
+            Err(e) => StatusMessage::Error("Failed to write to the store".into()),
         }
+
+        // let res: SHResults = ask(
+        //     &self.system,
+        //     &self.target,
+        //     SHRequest::WriteToStore {
+        //         location,
+        //         payload,
+        //         lifetime,
+        //     },
+        // )
+        // .await;
+
+        // if let SHResults::ReturnWriteStore(status) = res {
+        //     status
+        // } else {
+        //     StatusMessage::Error("Failed to write to the store".into())
+        // }
     }
 
     /// A method that reads from an insecure cache.  This method, accepts a `Location` and returns the payload in the

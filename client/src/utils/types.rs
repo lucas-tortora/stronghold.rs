@@ -38,6 +38,15 @@ impl<T> From<Result<T, String>> for ResultMessage<T> {
     }
 }
 
+impl<T> From<Result<T, anyhow::Error>> for ResultMessage<T> {
+    fn from(result: Result<T, anyhow::Error>) -> Self {
+        match result {
+            Ok(t) => ResultMessage::Ok(t),
+            Err(e) => ResultMessage::Error(format!("{:?}", e)),
+        }
+    }
+}
+
 /// A `Location` type used to specify where in the `Stronghold` a piece of data should be stored. A generic location
 /// specifies a non-versioned location while a counter location specifies a versioned location. The Counter location can
 /// be used to get the head of the version chain by passing in `None` as the counter index. Otherwise, counter records
