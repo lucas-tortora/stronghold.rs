@@ -4,4 +4,6 @@
  
 - replace actor system riker with latest actix
 - introduced registry actor for clients
-- introduced security actor for writing secrets and working with procedures
+- merge `Internal` and `Client`-Actors into `SecureClientActor`
+- 
+ 

@@ -18,8 +18,8 @@ pub use self::{
         messages::{GetClient, HasClient, InsertClient, RemoveClient},
         Registry, RegistryError,
     },
-    secure::messages,
-    secure::SecureActor,
+    secure::messages as secure_messages,
+    secure::SecureClient,
     snapshot::SMsg,
 };
 

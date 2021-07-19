@@ -90,4 +90,7 @@ pub enum Error {
 
     #[error("Id Conversion Error ({0})")]
     IdConversionError(String),
+
+    #[error("Path Error: ({0})")]
+    PathError(String),
 }

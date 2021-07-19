@@ -38,79 +38,13 @@ use communication::actor::{PermissionValue, RequestPermissions, ToPermissionVari
 // -- NEW ACTIX IMPL
 // --
 
-impl Actor for Client {
-    type Context = Context<Self>;
-}
+// impl Actor for Client {
+//     type Context = Context<Self>;
+// }
 
-impl Supervised for Client {}
+// impl Supervised for Client {}
 
-impl SystemService for Client {}
-
-impl Handler<SHRequest> for Client {
-    // TODO Define proper error types
-    type Result = (); //Result<(), Box<dyn std::error::Error>>;
-
-    fn handle(&mut self, msg: SHRequest, ctx: &mut Self::Context) -> Self::Result {
-        match msg {
-            SHRequest::CheckVault(path) => todo!(),
-            SHRequest::CheckRecord { location } => todo!(),
-            SHRequest::WriteToStore {
-                location,
-                payload,
-                lifetime,
-            } => todo!(),
-            SHRequest::ReadFromStore { location } => todo!(),
-            SHRequest::DeleteFromStore(_) => todo!(),
-            SHRequest::CreateNewVault(_) => todo!(),
-            SHRequest::WriteToVault {
-                location,
-                payload,
-                hint,
-            } => todo!(),
-            #[cfg(test)]
-            SHRequest::ReadFromVault { location } => todo!(),
-            SHRequest::RevokeData { location } => todo!(),
-            SHRequest::GarbageCollect(_) => todo!(),
-            SHRequest::ListIds(_) => todo!(),
-            SHRequest::ReadSnapshot {
-                key,
-                filename,
-                path,
-                cid,
-                former_cid,
-            } => todo!(),
-            SHRequest::WriteSnapshot { key, filename, path } => todo!(),
-            SHRequest::FillSnapshot => todo!(),
-            SHRequest::ClearCache { kill } => todo!(),
-            SHRequest::ControlRequest(_) => todo!(),
-        }
-    }
-}
-
-impl Handler<SHResults> for Client {
-    type Result = (); //Result<(), Box<dyn std::error::Error>>;
-
-    fn handle(&mut self, msg: SHResults, ctx: &mut Self::Context) -> Self::Result {
-        match msg {
-            SHResults::ReturnWriteStore(_) => todo!(),
-            SHResults::ReturnReadStore(_, _) => todo!(),
-            SHResults::ReturnDeleteStore(_) => todo!(),
-            SHResults::ReturnCreateVault(_) => todo!(),
-            SHResults::ReturnWriteVault(_) => todo!(),
-            SHResults::ReturnReadVault(_, _) => todo!(),
-            SHResults::ReturnRevoke(_) => todo!(),
-            SHResults::ReturnGarbage(_) => todo!(),
-            SHResults::ReturnList(_, _) => todo!(),
-            SHResults::ReturnFillSnap(_) => todo!(),
-            SHResults::ReturnWriteSnap(_) => todo!(),
-            SHResults::ReturnReadSnap(_) => todo!(),
-            SHResults::ReturnClearCache(_) => todo!(),
-            SHResults::ReturnControlRequest(_) => todo!(),
-            SHResults::ReturnExistsVault(_) => todo!(),
-            SHResults::ReturnExistsRecord(_) => todo!(),
-        }
-    }
-}
+// impl SystemService for Client {}
 
 // --
 // -- END NEW ACTIX IMPL
@@ -277,7 +211,6 @@ impl From<ProcResult> for SerdeProcResult {
 #[derive(Clone, GuardDebug, Serialize, Deserialize)]
 #[cfg_attr(feature = "communication", derive(RequestPermissions))]
 pub enum SHRequest {
-    #[deprecated]
     // moved to SecureClientActor
     // check if vault exists.
     CheckVault(Vec<u8>),

@@ -6,18 +6,14 @@
 //! The secure actor runs as service, isolates contained data, and synchronizes
 //! across multiple accesses.
 
-// TODO - impl procedures
-// TODO - question remains, if the secure actor should reside
-// inside a logical slice of client/secureactor for separation, or
-// if there is another means to securely isolate calls from others
-// concurrent client actor access during the lifetime of the secure
-// actor.
+// TODO - move functions from internal / client
 
 use crate::{
     internals::Provider,
     state::{
         client::{Client, Store},
         key_store::KeyStore,
+        secure::SecureClient,
         snapshot::Snapshot,
     },
     utils::StatusMessage,
@@ -76,17 +72,20 @@ pub mod messages {
     }
 
     #[derive(Clone, GuardDebug)]
-    pub struct ReloadData {
+    pub struct ReloadData<T: BoxProvider + Send + Sync + Clone + 'static + Unpin> {
         pub id: ClientId,
 
         // TODO this could be re-worked for generalized synchronisation facilities
-        pub data: Box<(HashMap<VaultId, Key<Provider>>, DbView<Provider>, Store)>,
+        pub data: Box<(HashMap<VaultId, Key<T>>, DbView<T>, Store)>,
 
         // this might be obsolete, as we can return direct responses
         pub status: StatusMessage,
     }
 
-    impl Message for ReloadData {
+    impl<T> Message for ReloadData<T>
+    where
+        T: BoxProvider + Send + Sync + Clone + 'static + Unpin,
+    {
         type Result = ();
     }
 
@@ -168,13 +167,6 @@ pub mod messages {
 
     impl Message for ClearCache {
         type Result = Result<(), anyhow::Error>;
-    }
-
-    #[derive(Clone, GuardDebug)]
-    pub struct KillInternal;
-
-    impl Message for KillInternal {
-        type Result = ();
     }
 
     #[derive(Clone, GuardDebug)]
@@ -302,9 +294,12 @@ pub mod testing {
     }
 }
 
+/// Functional macro to remove boilerplate code for the implementation
+/// of the [`SecureActor`].
+/// TODO Make receiver type pass as argument.
 macro_rules! impl_handler {
     ($mty:ty, $rty:ty, ($sid:ident,$mid:ident, $ctx:ident), $($body:tt)*) => {
-        impl<T> Handler<$mty> for SecureActor<T>
+        impl<T> Handler<$mty> for SecureClient<T>
         where
             T :  BoxProvider + Send + Sync + Clone + 'static + Unpin /* UNPIN has been added. see Provider for support. */
         {
@@ -316,28 +311,27 @@ macro_rules! impl_handler {
     };
 
     ($mty:ty, $rty:ty, $($body:tt)*) => {
-        impl_handler!($mty, $rty, (self,msg, ctx), $($body)*);
+        impl_handler!($mty, $rty, (self,msg,ctx), $($body)*);
     }
 }
 
-// #[derive(Default)]
+// pub struct SecureClientActor<P>
+// where
+//     P: BoxProvider + Send + Sync + Clone + 'static + Unpin, /* UNPIN has been added. see Provider for support. */
+// {
+//     // this is a remnant of internal actor.
+//     // since secure actor shall synchronize working
+//     // and writing secrets across various clients, this might not be needed
+//     // here. The client_id was used to get a reference to the respective
+//     // actor.
+//     // client_id: ClientId,
+//     client: Client,
 
-/// TODO You see this comment? Rename to `ClientActor`
-pub struct SecureClientActor<P>
-where
-    P: BoxProvider + Send + Sync + Clone + 'static + Unpin, /* UNPIN has been added. see Provider for support. */
-{
-    // this is a remnant of internal actor.
-    // since secure actor shall synchronize working
-    // and writing secrets across various clients, this might not be needed
-    // here. The client_id was used to get a reference to the respective
-    // actor.
-    client_id: ClientId,
-    keystore: KeyStore<P>,
-    db: DbView<P>,
-}
+//     keystore: KeyStore<P>,
+//     db: DbView<P>,
+// }
 
-impl<P> Actor for SecureClientActor<P>
+impl<P> Actor for SecureClient<P>
 where
     P: BoxProvider + Send + Sync + Clone + 'static + Unpin, /* UNPIN has been added. see Provider for support. */
 {
@@ -345,14 +339,27 @@ where
 }
 
 /// Make the [`SecureActor'] failure resistant
-impl<P> Supervised for SecureClientActor<P> where
+impl<P> Supervised for SecureClient<P> where
     P: BoxProvider + Send + Sync + Clone + 'static + Unpin /* UNPIN has been added. see Provider for support. */
 {
 }
 
+impl<P> SecureClient<P>
+where
+    P: BoxProvider + Send + Sync + Clone + 'static + Unpin,
+{
+    pub fn new(client_id: ClientId) -> Self {
+        SecureClient {
+            client: Client::new(client_id),
+            keystore: KeyStore::new(),
+            db: DbView::new(),
+        }
+    }
+}
+
 // impl<P> SystemService for SecureActor<P> where P: BoxProvider + Send + Sync + Clone + 'static {}
 
-impl_handler!(messages::KillInternal, (), (self, msg, ctx), {
+impl_handler!(messages::Terminate, (), (self, msg, ctx), {
     ctx.stop();
 });
 
@@ -427,14 +434,16 @@ impl_handler!(
     }
 );
 
-impl_handler!(messages::ReloadData, (), (self, msg, ctx), {
+impl_handler!(messages::ReloadData<T>, (), (self, msg, ctx), {
     let (keystore, state, store) = *msg.data;
     let vids = keystore.keys().copied().collect::<HashSet<VaultId>>();
     self.keystore.rebuild_keystore(keystore);
     self.db = state;
 
-    // call rebuild cache from client actor
-    todo!()
+    // TODO / FIXME : client contains state, the secure actor has a reference
+    // to it.
+    self.client.clear_cache();
+    self.client.rebuild_cache(self.client.client_id, vids, store);
 });
 
 impl_handler!(messages::ReadSnapshot, Result<(), anyhow::Error>, (self, msg, ctx),  {
@@ -445,8 +454,10 @@ impl_handler!(messages::ReadSnapshot, Result<(), anyhow::Error>, (self, msg, ctx
 });
 
 impl_handler!(messages::CheckVault, Result<(), anyhow::Error>, (self, msg, ctx), {
-    let vid = self.derive_vault_id(msg.vault_path);
-    self.vault_exist(vid).ok_or(|e| anyhow::anyhow!(e))
+    let vid = self.client.derive_vault_id(msg.vault_path);
+    self.client.vault_exist(vid).ok_or(anyhow::anyhow!(VaultError::NotExisting));
+    Ok(())
+
 });
 
 // ----

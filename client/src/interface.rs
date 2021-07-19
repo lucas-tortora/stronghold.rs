@@ -27,10 +27,10 @@ use zeroize::Zeroize;
 
 use crate::{
     actors::{
-        messages as secure_messages, GetClient, HasClient, InsertClient, InternalActor, ProcResult, Procedure,
-        Registry, SHRequest, SHResults, SecureActor,
+        secure_messages, GetClient, HasClient, InsertClient, InternalActor, ProcResult, Procedure, Registry, SHRequest,
+        SHResults, SecureClientActor,
     },
-    line_error,
+    internals, line_error,
     state::{
         client::Client,
         snapshot::{Snapshot, SnapshotState},
@@ -67,10 +67,11 @@ pub struct Stronghold<A>
 where
     A: Actor,
 {
-    pub system: Option<SystemRunner>,
+    // we can skip this optional reference, since we won't need the system to drive
+    // the api. Since the user must provide it's own runtime.
+    // pub system: Option<SystemRunner>,
     registry: Addr<Registry>,
-    target: Addr<Client>,
-    secure: Addr<SecureActor<crate::internals::Provider>>,
+    target: Addr<SecureClientActor<internals::Provider>>, // check dependency on provider
 
     #[cfg(feature = "communication")]
     communication_actor: Option<Addr<A>>,
@@ -95,35 +96,28 @@ impl<A: Actor> Stronghold<A> {
         // create client actor
         let client_id =
             ClientId::load_from_path(&client_path, &client_path).expect(crate::Error::IDError.to_string().as_str());
+
         let runner = system.unwrap_or_else(|| System::new());
 
         // the registry will be run as a system service
         let registry = Registry::from_registry();
         let snapshot = Snapshot::new(SnapshotState::default()).start();
+
+        // we need to block for the target client actor
         let target = match runner.block_on(registry.send(InsertClient { id: client_id }))? {
             Ok(addr) => addr,
             Err(e) => return Err(anyhow::anyhow!(e)),
         };
 
-        // start secure actor
-        let secure = SecureActor::default().start();
-
         Ok(Self {
-            system,
+            // system,
             registry,
             target,
-            secure,
 
             #[cfg(feature = "communication")]
             communication_actor: None,
         })
     }
-
-    // /// Returns non-mutable access to the underlying executor runtime
-    // /// to eg. drive [`Future`]s.
-    // pub fn get_executor_runtime(&self) -> Option<&SystemRunner> {
-    //     self.system.as_ref()
-    // }
 
     /// Spawns a new set of actors for the Stronghold system. Accepts the client_path: `Vec<u8>` and the options:
     /// `StrongholdFlags`
@@ -146,10 +140,6 @@ impl<A: Actor> Stronghold<A> {
                             Err(e) => return StatusMessage::Error("".to_string()),
                         };
                     }
-
-                    // shut down secure actor and restart
-                    self.secure.send(secure_messages::Terminate).await;
-                    self.secure = SecureActor::default().start();
                 }
             }
         };
@@ -186,13 +176,41 @@ impl<A: Actor> Stronghold<A> {
         hint: RecordHint,
         _options: Vec<VaultFlags>,
     ) -> StatusMessage {
-        // actix reference implementation
-
-        // self.target.send
+        use crate::actors::secure_messages::{CheckVault, WriteToVault};
 
         let vault_path = &location.vault_path();
         let vault_path = vault_path.to_vec();
 
+        let (vault_id, record_id) = match location {
+            Location::Generic {
+                record_path,
+                vault_path,
+            } => {}
+            Location::Counter { counter, vault_path } => {}
+        };
+
+        // new actix impl
+        match self.target.send(CheckVault { vault_path }).await {
+            Ok(result) => match result {
+                Ok(_) => {
+                    // exists
+
+                    self.target
+                        .send(WriteToVault {
+                            vault_id,
+                            record_id,
+                            payload,
+                            hint,
+                        })
+                        .await;
+                }
+                Err(_) => { // does not exist
+                }
+            },
+            Err(_) => {}
+        }
+
+        // old riker impl
         if let SHResults::ReturnExistsVault(b) =
             ask(&self.system, &self.target, SHRequest::CheckVault(vault_path.clone())).await
         {

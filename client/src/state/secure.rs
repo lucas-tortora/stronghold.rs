@@ -1,29 +1,35 @@
 // Copyright 2020-2021 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{
-    actors::{InternalResults, SHRequest, SHResults},
-    line_error,
-    utils::LoadFromPath,
-    Location,
-};
+//! Secure Client Actor State
+//!
+//! State variable client actor
+
+use crate::{state::key_store::KeyStore, Location};
 
 use engine::{
     store::Cache,
-    vault::{ClientId, RecordId, VaultId},
+    vault::{BoxProvider, ClientId, DbView, RecordId, VaultId},
 };
-
 use std::{collections::HashSet, time::Duration};
 
-use serde::{Deserialize, Serialize};
-
+/// Cache typedef
 pub type Store = Cache<Vec<u8>, Vec<u8>>;
 
-/// A `Client` Cache Actor which routes external messages to the rest of the Stronghold system.
-// #[actor(SHResults, SHRequest, InternalResults)]
-// TODO marker todo, added default derivation
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct Client {
+pub struct SecureClient<Pr>
+where
+    Pr: BoxProvider + Send + Sync + Clone + 'static + Unpin, /* UNPIN has been added. see Provider for support. */
+{
+    // this is a remnant of internal actor.
+    // since secure actor shall synchronize working
+    // and writing secrets across various clients, this might not be needed
+    // here. The client_id was used to get a reference to the respective
+    // actor.
+    // client_id: ClientId,
+    // client: Client,
+    keystore: KeyStore<Pr>,
+    db: DbView<Pr>,
+
     pub client_id: ClientId,
     // Contains the vault ids and the record ids with their associated indexes.
     pub vaults: HashSet<VaultId>,
@@ -31,7 +37,7 @@ pub struct Client {
     pub store: Store,
 }
 
-impl Client {
+impl<Pr> SecureClient<Pr> {
     /// Creates a new Client given a `ClientID` and `ChannelRef<SHResults>`
     pub fn new(client_id: ClientId) -> Self {
         let vaults = HashSet::new();
@@ -42,6 +48,8 @@ impl Client {
             client_id,
             vaults,
             store,
+            keystore: KeyStore::new(),
+            db: DbView::new(),
         }
     }
 
@@ -88,6 +96,9 @@ impl Client {
             client_id: id,
             vaults,
             store,
+
+            db: self.db,
+            keystore: self.keystore,
         }
     }
 
@@ -161,7 +172,7 @@ mod tests {
     fn test_add() {
         let vid = VaultId::random::<Provider>().expect(line_error!());
 
-        let mut cache = Client::new(ClientId::random::<Provider>().expect(line_error!()));
+        let mut cache = SecureClient::new(ClientId::random::<Provider>().expect(line_error!()));
 
         cache.add_new_vault(vid);
 
@@ -176,7 +187,7 @@ mod tests {
         let vid2 = VaultId::random::<Provider>().expect(line_error!());
         let vault_path = b"some_vault".to_vec();
 
-        let mut client = Client::new(clientid);
+        let mut client = SecureClient::new(clientid);
         let mut ctr = 0;
         let mut ctr2 = 0;
 
@@ -211,7 +222,7 @@ mod tests {
         let vidlochead = Location::counter::<_, usize>("some_vault", 0);
         let vidlochead2 = Location::counter::<_, usize>("some_vault 2", 0);
 
-        let mut client = Client::new(clientid);
+        let mut client = SecureClient::new(clientid);
 
         let (vid, rid) = client.resolve_location(vidlochead.clone());
         let (vid2, rid2) = client.resolve_location(vidlochead2.clone());

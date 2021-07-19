@@ -3,4 +3,5 @@
 
 pub mod client;
 pub mod key_store;
+pub mod secure;
 pub mod snapshot;

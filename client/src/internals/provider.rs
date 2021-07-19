@@ -12,11 +12,15 @@ use serde::{Deserialize, Serialize};
 
 /// An implementation of the Vault's `BoxProvider type.  Used to encrypt and decrypt the data in this Stronghold.
 #[derive(Ord, PartialEq, Eq, PartialOrd, Clone, Debug, Serialize, Deserialize, Default)]
+
 pub struct Provider;
 impl Provider {
     const NONCE_LEN: usize = XChaCha20Poly1305::NONCE_LENGTH;
     const TAG_LEN: usize = XChaCha20Poly1305::TAG_LENGTH;
 }
+
+/// FIXME: this is a requirement for actix' [`System]
+impl Unpin for Provider {}
 
 impl BoxProvider for Provider {
     fn box_key_len() -> usize {

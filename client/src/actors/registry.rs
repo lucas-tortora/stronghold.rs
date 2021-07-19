@@ -17,7 +17,9 @@ use engine::vault::ClientId;
 use std::collections::HashMap;
 use thiserror::Error as ErrorType;
 
-use crate::state::{client::Client, snapshot::Snapshot};
+use crate::{internals, state::snapshot::Snapshot};
+
+use super::SecureClientActor;
 
 #[derive(Debug, ErrorType)]
 pub enum RegistryError {
@@ -37,7 +39,7 @@ pub mod messages {
     }
 
     impl Message for InsertClient {
-        type Result = Result<Addr<Client>, RegistryError>;
+        type Result = Result<Addr<SecureClientActor<internals::Provider>>, RegistryError>;
     }
 
     pub struct RemoveClient {
@@ -53,7 +55,7 @@ pub mod messages {
     }
 
     impl Message for GetClient {
-        type Result = Option<Addr<Client>>;
+        type Result = Option<Addr<SecureClientActor<internals::Provider>>>;
     }
 
     #[derive(Message)]
@@ -75,17 +77,14 @@ pub mod messages {
 /// can be modified
 #[derive(Default)]
 pub struct Registry {
-    clients: HashMap<ClientId, Addr<Client>>,
+    clients: HashMap<ClientId, Addr<SecureClientActor<internals::Provider>>>,
     snapshot: Option<WeakAddr<Snapshot>>,
 }
 
-impl Supervised for Registry {
-    // TODO check, if certains functions need to be overidden
-}
+impl Supervised for Registry {}
 
 impl Actor for Registry {
     type Context = Context<Self>;
-    // TODO check, if certain functions need to be overidden
 }
 
 /// For synchronized access across multiple clients, the [`Registry`]
@@ -101,7 +100,7 @@ impl Handler<messages::HasClient> for Registry {
 }
 
 impl Handler<messages::InsertClient> for Registry {
-    type Result = Result<Addr<Client>, RegistryError>;
+    type Result = Result<Addr<SecureClientActor<internals::Provider>>, RegistryError>;
 
     fn handle(&mut self, msg: messages::InsertClient, ctx: &mut Self::Context) -> Self::Result {
         if let Some(_) = self.clients.get(&msg.id) {
@@ -109,13 +108,13 @@ impl Handler<messages::InsertClient> for Registry {
         }
 
         self.clients
-            .insert(msg.id, Client::new(msg.id).start())
+            .insert(msg.id, SecureClientActor::new(msg.id).start())
             .ok_or(RegistryError::ClientAlreadyPresentById("".to_string()))
     }
 }
 
 impl Handler<messages::GetClient> for Registry {
-    type Result = Option<Addr<Client>>;
+    type Result = Option<Addr<SecureClientActor<internals::Provider>>>;
 
     fn handle(&mut self, msg: messages::GetClient, ctx: &mut Self::Context) -> Self::Result {
         if let Some(client) = self.clients.get(&msg.id) {

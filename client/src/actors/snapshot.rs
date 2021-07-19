@@ -14,7 +14,7 @@ use engine::{
 
 use stronghold_utils::GuardDebug;
 
-use crate::actors::{secure::messages as secure_messages, SecureActor};
+use crate::actors::{secure::messages as secure_messages, SecureClientActor};
 use crate::{
     actors::{InternalMsg, SHResults},
     line_error,
@@ -119,7 +119,7 @@ impl Handler<messages::ReadFromSnapshot> for Snapshot {
             let data = self.get_state(cid);
 
             // load secure actor
-            let secure = SecureActor::from_registry();
+            let secure = SecureClientActor::from_registry();
 
             secure.send(secure_messages::ReloadData {
                 id: cid,
@@ -133,7 +133,7 @@ impl Handler<messages::ReadFromSnapshot> for Snapshot {
                     *self = snapshot;
 
                     // load secure actor
-                    let secure = SecureActor::from_registry();
+                    let secure = SecureClientActor::from_registry();
                     secure.send(secure_messages::ReloadData {
                         id: cid,
                         data: Box::new(data),
