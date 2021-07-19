@@ -206,6 +206,24 @@ pub mod messages {
     impl Message for WriteToStore {
         type Result = Result<(), anyhow::Error>;
     }
+
+    #[derive(Clone, GuardDebug)]
+    pub struct ReadFromStore {
+        pub location: Location,
+    }
+
+    impl Message for ReadFromStore {
+        type Result = Result<Vec<u8>, anyhow::Error>;
+    }
+
+    #[derive(Clone, GuardDebug)]
+    pub struct DeleteFromStore {
+        pub location: Location,
+    }
+
+    impl Message for DeleteFromStore {
+        type Result = Result<(), anyhow::Error>;
+    }
 }
 
 pub mod procedures {
@@ -457,6 +475,27 @@ impl_handler!(messages::WriteToStore, Result<(), anyhow::Error>, (self, msg, ctx
     self.write_to_store(vault_id.into(), msg.payload, msg.lifetime);
 
     Ok(())
+});
+
+impl_handler!(
+    messages::ReadFromStore,
+    Result<Vec<u8>, anyhow::Error>,
+    (self, msg, ctx),
+    {
+        let (vault_id, _) = self.resolve_location(msg.location);
+
+        match self.read_from_store(vault_id.into()) {
+            Some(data) => Ok(data),
+            None => Err(anyhow::anyhow!(VaultError::NotExisting)), // semantically wrong, use store error
+        }
+    }
+);
+
+impl_handler!( messages::DeleteFromStore, Result <(), anyhow::Error>, (self, msg, ctx), {
+        let (vault_id, _) = self.resolve_location(msg.location);
+        self.store_delete_item(vault_id.into());
+
+        Ok(())
 });
 
 // ----

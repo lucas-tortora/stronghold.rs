@@ -9,7 +9,7 @@
 
 // TODO: add access to runtime of actix
 
-use futures::future::RemoteHandle;
+use futures::{future::RemoteHandle, io::Read};
 
 // // TODO remove
 // use riker::*;
@@ -336,25 +336,47 @@ impl<A: Actor> Stronghold<A> {
     /// `StatusMessage`.  Note: One store is mapped to
     /// one client. Can specify the same location across multiple clients.
     pub async fn read_from_store(&self, location: Location) -> (Vec<u8>, StatusMessage) {
-        let res: SHResults = ask(&self.system, &self.target, SHRequest::ReadFromStore { location }).await;
+        // TODO move to top
+        use crate::actors::secure_messages::ReadFromStore;
 
-        if let SHResults::ReturnReadStore(payload, status) = res {
-            (payload, status)
-        } else {
-            (vec![], StatusMessage::Error("Failed to read from the store".into()))
+        match self.target.send(ReadFromStore { location }).await {
+            Ok(result) => match result {
+                Ok(data) => (data, StatusMessage::OK),
+                Err(e) => (Vec::new(), StatusMessage::Error(format!("{:?}", e))),
+            },
+            Err(e) => (Vec::new(), StatusMessage::Error(format!("{:?}", e))),
         }
+
+        // let res: SHResults = ask(&self.system, &self.target, SHRequest::ReadFromStore { location }).await;
+
+        // if let SHResults::ReturnReadStore(payload, status) = res {
+        //     (payload, status)
+        // } else {
+        //     (vec![], StatusMessage::Error("Failed to read from the store".into()))
+        // }
     }
 
     /// A method to delete data from an insecure cache. This method, accepts a `Location` and returns a `StatusMessage`.
     /// Note: One store is mapped to one client. Can specify the same location across multiple clients.
     pub async fn delete_from_store(&self, location: Location) -> StatusMessage {
-        let res: SHResults = ask(&self.system, &self.target, SHRequest::DeleteFromStore(location)).await;
+        // TODO move to top
+        use crate::actors::secure_messages::DeleteFromStore;
 
-        if let SHResults::ReturnDeleteStore(status) = res {
-            status
-        } else {
-            StatusMessage::Error("Failed to delete from the store".into())
+        match self.target.send(DeleteFromStore { location }).await {
+            Ok(result) => match result {
+                Ok(_) => StatusMessage::OK,
+                Err(e) => StatusMessage::Error(format!("{:?}", e)),
+            },
+            Err(e) => StatusMessage::Error("Failed to delete from the store".into()),
         }
+
+        // let res: SHResults = ask(&self.system, &self.target, SHRequest::DeleteFromStore(location)).await;
+
+        // if let SHResults::ReturnDeleteStore(status) = res {
+        //     status
+        // } else {
+        //     StatusMessage::Error("Failed to delete from the store".into())
+        // }
     }
 
     /// Revokes the data from the specified location of type `Location`. Revoked data is not readable and can be removed
