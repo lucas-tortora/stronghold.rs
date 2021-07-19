@@ -5,6 +5,10 @@
 //!
 //! State variable client actor
 
+// replace with proper error handling
+// after actix migration
+use crate::line_error;
+
 use crate::{state::key_store::KeyStore, Location};
 
 use engine::{
@@ -13,7 +17,7 @@ use engine::{
 };
 use std::{collections::HashSet, time::Duration};
 
-/// Cache typedef
+/// Cache type definition
 pub type Store = Cache<Vec<u8>, Vec<u8>>;
 
 pub struct SecureClient<Pr>
@@ -28,8 +32,10 @@ where
     // client_id: ClientId,
     // client: Client,
     keystore: KeyStore<Pr>,
-    db: DbView<Pr>,
 
+    // A view on the vault entries
+    db: DbView<Pr>,
+    // The id of this client
     pub client_id: ClientId,
     // Contains the vault ids and the record ids with their associated indexes.
     pub vaults: HashSet<VaultId>,

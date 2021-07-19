@@ -344,18 +344,18 @@ impl<P> Supervised for SecureClient<P> where
 {
 }
 
-impl<P> SecureClient<P>
-where
-    P: BoxProvider + Send + Sync + Clone + 'static + Unpin,
-{
-    pub fn new(client_id: ClientId) -> Self {
-        SecureClient {
-            client: Client::new(client_id),
-            keystore: KeyStore::new(),
-            db: DbView::new(),
-        }
-    }
-}
+// impl<P> SecureClient<P>
+// where
+//     P: BoxProvider + Send + Sync + Clone + 'static + Unpin,
+// {
+//     pub fn new(client_id: ClientId) -> Self {
+//         SecureClient {
+//             client: Client::new(client_id),
+//             keystore: KeyStore::new(),
+//             db: DbView::new(),
+//         }
+//     }
+// }
 
 // impl<P> SystemService for SecureActor<P> where P: BoxProvider + Send + Sync + Clone + 'static {}
 
