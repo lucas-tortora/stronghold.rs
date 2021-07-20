@@ -139,7 +139,7 @@ pub mod messages {
 
     #[derive(Clone, GuardDebug)]
     pub struct ListIds {
-        pub vault_path: Vec<u8>, // old implementation references the vault_path
+        pub vault_path: Vec<u8>,
     }
 
     impl Message for ListIds {

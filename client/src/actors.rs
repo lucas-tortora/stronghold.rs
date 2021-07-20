@@ -19,6 +19,7 @@ pub use self::{
         Registry, RegistryError,
     },
     secure::messages as secure_messages,
+    secure::procedures as secure_procedures,
     secure::SecureClient,
     snapshot::SMsg,
 };

@@ -513,11 +513,50 @@ impl<A: Actor> Stronghold<A> {
     /// Executes a runtime command given a `Procedure`.  Returns a `ProcResult` based off of the control_request
     /// specified.
     pub async fn runtime_exec(&self, control_request: Procedure) -> ProcResult {
-        let shr = ask(&self.system, &self.target, SHRequest::ControlRequest(control_request)).await;
-        match shr {
-            SHResults::ReturnControlRequest(pr) => pr,
-            _ => ProcResult::Error("Invalid communication event".into()),
+        // TODO this might be the biggest change in adapting the
+        // interface to actix. as procedures are split among structures
+        // inside the secure client, passed arguments to execute a procedure
+        // may be mapped to internal procedures.
+
+        use crate::actors::secure_procedures::{
+            BIP39Generate, BIP39Recover, Ed25519PublicKey, Ed25519Sign, SLIP10DeriveFromKey, SLIP10DeriveFromSeed,
+            SLIP10Generate,
+        };
+
+        match control_request {
+            Procedure::SLIP10Generate {
+                output,
+                hint,
+                size_bytes,
+            } => todo!(),
+
+            Procedure::SLIP10Derive {
+                chain,
+                input,
+                output,
+                hint,
+            } => todo!(),
+            Procedure::BIP39Recover {
+                mnemonic,
+                passphrase,
+                output,
+                hint,
+            } => todo!(),
+            Procedure::BIP39Generate {
+                passphrase,
+                output,
+                hint,
+            } => todo!(),
+            Procedure::BIP39MnemonicSentence { seed } => todo!(),
+            Procedure::Ed25519PublicKey { private_key } => todo!(),
+            Procedure::Ed25519Sign { private_key, msg } => todo!(),
         }
+
+        // let shr = ask(&self.system, &self.target, SHRequest::ControlRequest(control_request)).await;
+        // match shr {
+        //     SHResults::ReturnControlRequest(pr) => pr,
+        //     _ => ProcResult::Error("Invalid communication event".into()),
+        // }
     }
 
     /// Checks whether a record exists in the client based off of the given `Location`.

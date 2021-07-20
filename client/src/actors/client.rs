@@ -58,7 +58,7 @@ pub enum SLIP10DeriveInput {
     Key(Location),
 }
 
-/// Procedure type used to call to the runtime via `Strongnhold.runtime_exec(...)`.
+/// Procedure type used to call to the runtime via `Stronghold.runtime_exec(...)`.
 #[allow(dead_code)]
 #[derive(GuardDebug, Clone, Serialize, Deserialize)]
 pub enum Procedure {
