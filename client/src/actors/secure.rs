@@ -62,13 +62,9 @@ pub enum VaultError {
 /// Message types for [`SecureClientActor`]
 pub mod messages {
 
-    use std::time::Duration;
-
-    use futures::io::Write;
-
-    use crate::Location;
-
     use super::*;
+    use crate::Location;
+    use std::time::Duration;
 
     #[derive(Clone, GuardDebug)]
     pub struct Terminate;
@@ -122,8 +118,9 @@ pub mod messages {
 
     #[derive(Clone, GuardDebug)]
     pub struct RevokeData {
-        pub vault_id: VaultId,
-        pub record_id: RecordId,
+        pub location: Location,
+        // pub vault_id: VaultId,
+        // pub record_id: RecordId,
     }
 
     impl Message for RevokeData {
@@ -132,7 +129,8 @@ pub mod messages {
 
     #[derive(Clone, GuardDebug)]
     pub struct GarbageCollect {
-        pub vault_id: VaultId,
+        pub location: Location,
+        // pub vault_id: VaultId,
     }
 
     impl Message for GarbageCollect {
@@ -141,7 +139,7 @@ pub mod messages {
 
     #[derive(Clone, GuardDebug)]
     pub struct ListIds {
-        pub vault_id: VaultId,
+        pub vault_path: Vec<u8>, // old implementation references the vault_path
     }
 
     impl Message for ListIds {
@@ -408,10 +406,13 @@ impl_handler!(messages::WriteToVault, Result<(), anyhow::Error>, (self, msg, ctx
 });
 
 impl_handler!(messages::RevokeData, Result<(), anyhow::Error>, (self, msg, ctx), {
-    return match self.keystore.get_key(msg.vault_id) {
+
+    let (vault_id, record_id) = self.resolve_location(msg.location);
+
+    return match self.keystore.get_key(vault_id) {
         Some(key) => {
-            self.keystore.insert_key(msg.vault_id, key);
-            self.db.revoke_record(&key, msg.vault_id, msg.record_id).map_err(|e| anyhow::anyhow!(e))
+            self.keystore.insert_key(vault_id, key);
+            self.db.revoke_record(&key, vault_id, record_id).map_err(|e| anyhow::anyhow!(e))
         }
         None => {
             Err(anyhow::anyhow!(VaultError::RevokationError))
@@ -420,10 +421,14 @@ impl_handler!(messages::RevokeData, Result<(), anyhow::Error>, (self, msg, ctx),
 });
 
 impl_handler!(messages::GarbageCollect, Result<(), anyhow::Error>, (self, msg, ctx), {
-    return match self.keystore.get_key(msg.vault_id) {
+
+    let (vault_id, _) = self.resolve_location(msg.location);
+
+
+    return match self.keystore.get_key(vault_id) {
         Some(key) => {
-            self.keystore.insert_key(msg.vault_id, key);
-            self.db.garbage_collect_vault(&key, msg.vault_id).map_err(|e| anyhow::anyhow!(e))
+            self.keystore.insert_key(vault_id, key);
+            self.db.garbage_collect_vault(&key, vault_id).map_err(|e| anyhow::anyhow!(e))
         }
         None => {
             Err(anyhow::anyhow!(VaultError::GargabeCollectError))
@@ -436,10 +441,12 @@ impl_handler!(
     Result<Vec<(RecordId, RecordHint)>, anyhow::Error>,
     (self, msg, ctx),
     {
-        match self.keystore.get_key(msg.vault_id) {
+        let vault_id = self.derive_vault_id(msg.vault_path);
+
+        match self.keystore.get_key(vault_id) {
             Some(key) => {
-                self.keystore.insert_key(msg.vault_id, key);
-                Ok(self.db.list_hints_and_ids(&key, msg.vault_id))
+                self.keystore.insert_key(vault_id, key);
+                Ok(self.db.list_hints_and_ids(&key, vault_id))
             }
             None => Err(anyhow::anyhow!(VaultError::ListError)),
         }

@@ -38,8 +38,8 @@ use crate::{
     utils::{LoadFromPath, StatusMessage, StrongholdFlags, VaultFlags},
     Location, Provider,
 };
-use engine::vault::RecordHint;
 use engine::vault::{ClientId, RecordId};
+use engine::vault::{RecordHint, VaultId};
 
 #[cfg(feature = "communication")]
 use comm::*;
@@ -383,51 +383,95 @@ impl<A: Actor> Stronghold<A> {
     /// from a vault with a call to `garbage_collect`.  if the `should_gc` flag is set to `true`, this call with
     /// automatically cleanup the revoke. Otherwise, the data is just marked as revoked.
     pub async fn delete_data(&self, location: Location, should_gc: bool) -> StatusMessage {
-        let vault_path = location.vault_path().to_vec();
-        let status;
+        use crate::actors::secure_messages::{GarbageCollect, RevokeData};
 
-        if should_gc {
-            let _ = if let SHResults::ReturnRevoke(status) =
-                ask(&self.system, &self.target, SHRequest::RevokeData { location }).await
-            {
-                status
-            } else {
-                return StatusMessage::Error("Could not revoke data".into());
-            };
-
-            status = if let SHResults::ReturnGarbage(status) = ask(
-                &self.system,
-                &self.target,
-                SHRequest::GarbageCollect(vault_path.clone()),
-            )
+        // new actix impl
+        match self
+            .target
+            .send(RevokeData {
+                location: location.clone(),
+            })
             .await
-            {
-                status
-            } else {
-                return StatusMessage::Error("Failed to garbage collect the vault".into());
-            };
-        } else {
-            status = if let SHResults::ReturnRevoke(status) =
-                ask(&self.system, &self.target, SHRequest::RevokeData { location }).await
-            {
-                status
-            } else {
-                return StatusMessage::Error("Could not revoke data".into());
-            };
+        {
+            Ok(result) => match result {
+                Ok(ok) if should_gc => match self.target.send(GarbageCollect { location }).await {
+                    Ok(result) => match result {
+                        Ok(_) => StatusMessage::OK,
+                        Err(e) => StatusMessage::Error(format!("{:?}", e)),
+                    },
+                    Err(e) => StatusMessage::Error("Failed to garbage collect the vault".into()),
+                },
+                Ok(ok) => StatusMessage::OK,
+                Err(e) => StatusMessage::Error("Could not revoke data".into()),
+            },
+            Err(e) => StatusMessage::Error("Could not revoke data".into()),
         }
 
-        status
+        // old riker impl
+        // let vault_path = location.vault_path().to_vec();
+        // let status;
+
+        // if should_gc {
+        //     let _ = if let SHResults::ReturnRevoke(status) =
+        //         ask(&self.system, &self.target, SHRequest::RevokeData { location }).await
+        //     {
+        //         status
+        //     } else {
+        //         return StatusMessage::Error("Could not revoke data".into());
+        //     };
+
+        //     status = if let SHResults::ReturnGarbage(status) = ask(
+        //         &self.system,
+        //         &self.target,
+        //         SHRequest::GarbageCollect(vault_path.clone()),
+        //     )
+        //     .await
+        //     {
+        //         status
+        //     } else {
+        //         return StatusMessage::Error("Failed to garbage collect the vault".into());
+        //     };
+        // } else {
+        //     status = if let SHResults::ReturnRevoke(status) =
+        //         ask(&self.system, &self.target, SHRequest::RevokeData { location }).await
+        //     {
+        //         status
+        //     } else {
+        //         return StatusMessage::Error("Could not revoke data".into());
+        //     };
+        // }
+
+        // status
     }
 
     /// Garbage collects any revokes in a Vault based on the given vault_path and the current target actor.
     pub async fn garbage_collect(&self, vault_path: Vec<u8>) -> StatusMessage {
-        if let SHResults::ReturnGarbage(status) =
-            ask(&self.system, &self.target, SHRequest::GarbageCollect(vault_path)).await
+        use crate::actors::secure_messages::GarbageCollect;
+
+        match self
+            .target
+            .send(GarbageCollect {
+                location: Location::Generic {
+                    vault_path,
+                    record_path: Vec::new(), // this will be dropped.
+                },
+            })
+            .await
         {
-            status
-        } else {
-            StatusMessage::Error("Failed to garbage collect the vault".into())
+            Ok(result) => match result {
+                Ok(_) => StatusMessage::OK,
+                Err(e) => StatusMessage::Error(format!("{:?}", e)),
+            },
+            Err(e) => StatusMessage::Error("Failed to garbage collect the vault".into()),
         }
+
+        // if let SHResults::ReturnGarbage(status) =
+        //     ask(&self.system, &self.target, SHRequest::GarbageCollect(vault_path)).await
+        // {
+        //     status
+        // } else {
+        //     StatusMessage::Error("Failed to garbage collect the vault".into())
+        // }
     }
 
     /// Returns a list of the available `RecordId` and `RecordHint` values in a vault by the given `vault_path`.
@@ -435,16 +479,35 @@ impl<A: Actor> Stronghold<A> {
         &self,
         vault_path: V,
     ) -> (Vec<(RecordId, RecordHint)>, StatusMessage) {
-        if let SHResults::ReturnList(ids, status) =
-            ask(&self.system, &self.target, SHRequest::ListIds(vault_path.into())).await
+        use crate::actors::secure_messages::ListIds;
+
+        match self
+            .target
+            .send(ListIds {
+                vault_path: vault_path.into(),
+            })
+            .await
         {
-            (ids, status)
-        } else {
-            (
-                vec![],
+            Ok(success) => match success {
+                Ok(result) => (result, StatusMessage::OK),
+                Err(e) => (Vec::new(), StatusMessage::Error(format!("{:?}", e))),
+            },
+            Err(e) => (
+                Vec::new(),
                 StatusMessage::Error("Failed to list hints and indexes from the vault".into()),
-            )
+            ),
         }
+
+        // if let SHResults::ReturnList(ids, status) =
+        //     ask(&self.system, &self.target, SHRequest::ListIds(vault_path.into())).await
+        // {
+        //     (ids, status)
+        // } else {
+        //     (
+        //         vec![],
+        //         StatusMessage::Error("Failed to list hints and indexes from the vault".into()),
+        //     )
+        // }
     }
 
     /// Executes a runtime command given a `Procedure`.  Returns a `ProcResult` based off of the control_request
